@@ -1,0 +1,11 @@
+{
+  "model": "openai/gpt-4o-mini",
+  "allowedUserIds": [123456789],
+  "privateSystemPrompt": "",
+  "systemPrompt": "",
+  "maxContextMessages": 200,
+  "fallbackContextTokens": 32768,
+  "safetyMarginPercent": 30,
+  "maxTokens": 1024,
+  "contextMessageMaxChars": 1000
+}

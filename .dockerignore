@@ -1,0 +1,7 @@
+node_modules
+data
+.env
+config.json
+.git
+PLAN.md
+README.md
