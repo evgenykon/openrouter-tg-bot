@@ -64,13 +64,12 @@ async function replyMarkdown(
   ctx: Context,
   text: string,
   opts: { reply_to_message_id?: number } = {},
-): Promise<void> {
+): Promise<Message | undefined> {
   try {
-    await ctx.reply(text, { ...opts, parse_mode: 'Markdown' })
+    return await ctx.reply(text, { ...opts, parse_mode: 'Markdown' })
   } catch (err) {
     if (err instanceof GrammyError && err.error_code === 400) {
-      await ctx.reply(text, opts)
-      return
+      return ctx.reply(text, opts)
     }
     throw err
   }
@@ -116,8 +115,23 @@ async function answer(
       return
     }
     const chunks = splitMessage(full)
+    let firstId: number | undefined
     for (const [i, chunk] of chunks.entries()) {
-      await replyMarkdown(ctx, chunk, i === 0 ? { reply_to_message_id: msg.message_id } : {})
+      const sent = await replyMarkdown(ctx, chunk, i === 0 ? { reply_to_message_id: msg.message_id } : {})
+      if (i === 0 && sent) firstId = sent.message_id
+    }
+    if (firstId !== undefined) {
+      const stored: StoredMessage = {
+        id: firstId,
+        userId: bot.botInfo.id,
+        name: bot.botInfo.first_name || bot.botInfo.username,
+        text: full,
+        date: Math.floor(Date.now() / 1000),
+        isBot: true,
+        isPrompt: false,
+      }
+      if (msg.chat.type === 'private') await saveDmMessage(msg.from?.id ?? 0, stored)
+      else await saveChatMessage(msg.chat.id, stored)
     }
   } catch (err) {
     console.error(`[error] chat=${msg.chat.id} user=${msg.from?.id}`, err)
@@ -193,6 +207,37 @@ bot.on('message', async (ctx) => {
         await ctx.reply(current, { reply_to_message_id: msg.message_id })
         break
       }
+      case 'ext_profile': {
+        const rest = stripCommand(msg.text ?? '', botUsername)
+        const parts = rest.split(/\s+/)
+        const isSet = parts[0] === 'set'
+        const idArg = isSet ? parts[1] : parts[0]
+        const targetId = Number(idArg)
+        if (!idArg || !Number.isInteger(targetId)) {
+          await ctx.reply(
+            'Формат: /ext_profile <id> — просмотр, /ext_profile set <id> <текст> — установить.',
+            { reply_to_message_id: msg.message_id },
+          )
+          break
+        }
+        if (isSet) {
+          const content = parts.slice(2).join(' ').trim()
+          if (!content) {
+            await ctx.reply('Пустой профиль — отправь текст после id.', { reply_to_message_id: msg.message_id })
+            break
+          }
+          await setProfile(targetId, content)
+          await ctx.reply(`Профиль пользователя ${targetId} сохранён.`, { reply_to_message_id: msg.message_id })
+          break
+        }
+        const current = (await getProfile(targetId)).trim()
+        if (!current) {
+          await ctx.reply(`Профиль пользователя ${targetId} пуст.`, { reply_to_message_id: msg.message_id })
+          break
+        }
+        await ctx.reply(`Профиль пользователя ${targetId}:\n${current}`, { reply_to_message_id: msg.message_id })
+        break
+      }
       case 'start':
         await answer(ctx, msg, isPrivate ? () => buildDmContext(msg.from.id, config, displayName(msg)) : () => buildGroupContext(chatId, config, msg.from.id, displayName(msg)), {
           name: displayName(msg),
@@ -204,6 +249,7 @@ bot.on('message', async (ctx) => {
           'Я — психологический помощник. Тегни меня (@' + botUsername + ') с вопросом.\n' +
             '/start — приветствие и начало диалога\n' +
             '/profile — посмотреть профиль; /profile set|add <текст> — сохранить или дополнить\n' +
+            '/ext_profile <id> — чужой профиль; set <id> <текст> — установить\n' +
             '/reset — очистить историю чата\n' +
             '/help — список команд\n' +
             '/show_prompt — показать текущий системный промпт',
@@ -284,6 +330,7 @@ async function main(): Promise<void> {
   const commands = [
     { command: 'start', description: 'Приветствие и начало диалога' },
     { command: 'profile', description: 'Профиль: просмотр, set/add <текст>, clear' },
+    { command: 'ext_profile', description: 'Профиль другого юзера: <id> или set <id> <текст>' },
     { command: 'reset', description: 'Очистить историю чата' },
     { command: 'show_prompt', description: 'Показать текущий системный промпт' },
     { command: 'help', description: 'Помощь' },

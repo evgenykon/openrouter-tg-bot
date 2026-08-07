@@ -84,7 +84,7 @@ export async function buildGroupContext(
 
   const history: ChatMessage[] = []
   for (const m of feed) {
-    if (m.isBot || m.isPrompt) continue
+    if (m.isPrompt) continue
     const line = `${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`
     if (fits(acc, line, budget, config.maxContextMessages, config.contextMessageMaxChars)) {
       history.push({ role: 'user', content: line })
@@ -114,7 +114,6 @@ export async function buildDmContext(
   const feed = await dmMessages(userId, config.maxContextMessages)
   const history: ChatMessage[] = []
   for (const m of feed) {
-    if (m.isBot) continue
     const line = `${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`
     if (fits(acc, line, budget, config.maxContextMessages, config.contextMessageMaxChars)) {
       history.push({ role: 'user', content: line })
