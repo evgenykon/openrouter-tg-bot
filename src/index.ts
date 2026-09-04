@@ -210,16 +210,18 @@ bot.on('message', async (ctx) => {
           )
           break
         }
-        const targetId = Number(rest)
-        if (!Number.isInteger(targetId)) {
+        const requested = Number(rest)
+        if (!Number.isInteger(requested)) {
           await ctx.reply('Формат: /compress_chat <id>. Укажи числовой id чата.', {
             reply_to_message_id: msg.message_id,
           })
           break
         }
         const chats = await listUserGroupChats(uid)
-        if (!chats.includes(targetId)) {
-          await ctx.reply(`Ты не найден в чате ${targetId}.`, { reply_to_message_id: msg.message_id })
+        // часть клиентов отрезает минус у отрицательных id — ищем реальный чат независимо от знака
+        const targetId = chats.find((cid) => cid === requested || cid === -requested)
+        if (targetId === undefined) {
+          await ctx.reply(`Ты не найден в чате ${requested}.`, { reply_to_message_id: msg.message_id })
           break
         }
         await ctx.replyWithChatAction('typing')
