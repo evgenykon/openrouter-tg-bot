@@ -54,6 +54,30 @@ function fits(
   return true
 }
 
+interface ProfileBlock {
+  messages: ChatMessage[]
+  tokens: number
+}
+
+async function buildProfiles(
+  participants: Map<number, string>,
+  currentUserId: number,
+  maxChars: number,
+): Promise<ProfileBlock> {
+  const messages: ChatMessage[] = []
+  let tokens = 0
+  const ordered = [currentUserId, ...[...participants.keys()].filter((uid) => uid !== currentUserId)]
+  for (const uid of ordered) {
+    const profile = (await getProfile(uid)).trim()
+    const line = profile
+      ? `Профиль пользователя ${participants.get(uid)} (личные данные, используй для анализа и уточняющих вопросов): ${clip(profile, maxChars)}`
+      : `Профиль пользователя ${participants.get(uid)}: не заполнен`
+    messages.push({ role: 'user', content: line })
+    tokens += estimateTokens(line)
+  }
+  return { messages, tokens }
+}
+
 export async function buildGroupContext(
   chatId: number,
   config: Config,
@@ -61,8 +85,6 @@ export async function buildGroupContext(
   currentUserName: string,
 ): Promise<ChatMessage[]> {
   const budget = await computeBudget(config)
-  const acc: Accumulator = { tokens: 0, count: 0 }
-  const out: ChatMessage[] = []
 
   const feed = await chatMessages(chatId, config.maxContextMessages)
   const participants = new Map<number, string>()
@@ -71,27 +93,21 @@ export async function buildGroupContext(
     participants.set(m.userId, m.name)
   }
   participants.set(currentUserId, currentUserName)
-  const ordered = [currentUserId, ...[...participants.keys()].filter((uid) => uid !== currentUserId)]
-  for (const uid of ordered) {
-    const profile = (await getProfile(uid)).trim()
-    const line = profile
-      ? `Профиль пользователя ${participants.get(uid)} (личные данные, используй для анализа и уточняющих вопросов): ${profile}`
-      : `Профиль пользователя ${participants.get(uid)}: не заполнен`
-    if (fits(acc, line, budget, config.maxContextMessages, config.contextMessageMaxChars)) {
-      out.push({ role: 'user', content: line })
-    }
-  }
+
+  const profiles = await buildProfiles(participants, currentUserId, config.contextMessageMaxChars)
+  const historyBudget = Math.max(0, budget - profiles.tokens)
+  const acc: Accumulator = { tokens: 0, count: 0 }
 
   const history: ChatMessage[] = []
   for (const m of feed) {
     if (m.isPrompt) continue
     const line = `${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`
-    if (fits(acc, line, budget, config.maxContextMessages, config.contextMessageMaxChars)) {
+    if (fits(acc, line, historyBudget, config.maxContextMessages, config.contextMessageMaxChars)) {
       history.push({ role: 'user', content: line })
     }
   }
 
-  return [...out, ...history.reverse()]
+  return [...profiles.messages, ...history.reverse()]
 }
 
 export async function buildDmContext(
@@ -100,27 +116,28 @@ export async function buildDmContext(
   userName: string,
 ): Promise<ChatMessage[]> {
   const budget = await computeBudget(config)
-  const acc: Accumulator = { tokens: 0, count: 0 }
-  const out: ChatMessage[] = []
 
   const profile = await getProfile(userId)
+  const profiles: ProfileBlock = { messages: [], tokens: 0 }
   if (profile.trim()) {
-    const line = `Профиль пользователя ${userName} (личные данные, используй для аналитики и вопросов): ${profile.trim()}`
-    if (fits(acc, line, budget, config.maxContextMessages, config.contextMessageMaxChars)) {
-      out.push({ role: 'user', content: line })
-    }
+    const line = `Профиль пользователя ${userName} (личные данные, используй для аналитики и вопросов): ${clip(profile.trim(), config.contextMessageMaxChars)}`
+    profiles.messages.push({ role: 'user', content: line })
+    profiles.tokens += estimateTokens(line)
   }
+
+  const historyBudget = Math.max(0, budget - profiles.tokens)
+  const acc: Accumulator = { tokens: 0, count: 0 }
 
   const feed = await dmMessages(userId, config.maxContextMessages)
   const history: ChatMessage[] = []
   for (const m of feed) {
     const line = `${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`
-    if (fits(acc, line, budget, config.maxContextMessages, config.contextMessageMaxChars)) {
+    if (fits(acc, line, historyBudget, config.maxContextMessages, config.contextMessageMaxChars)) {
       history.push({ role: 'user', content: line })
     }
   }
 
-  return [...out, ...history.reverse()]
+  return [...profiles.messages, ...history.reverse()]
 }
 
 export function splitMessage(text: string, limit = 4096): string[] {
