@@ -1,6 +1,10 @@
 import type { Config } from './config.ts'
-import { chatMessages, dmMessages, getProfile } from './db.ts'
-import { estimateTokens, getModelContextLength, type ChatMessage } from './openrouter.ts'
+import { chatMessages, dmMessages, getChatSummary, getProfile } from './db.ts'
+import { completeChat, estimateTokens, getModelContextLength, type ChatMessage } from './openrouter.ts'
+
+const SUMMARY_MAX_CHARS = 2000
+const SUMMARIZE_PROMPT =
+  'Ты — инструмент сжатия истории чата для долгосрочного контекста. Сохрани ключевое: участники, обсуждаемые темы, важные события, договорённости, эмоционально значимые моменты, незакрытые вопросы и общий контекст отношений. Пиши кратко, связно, на языке диалога. Не выдумывай и не добавляй лишнего.'
 
 export interface PromptRequest {
   name: string
@@ -95,7 +99,12 @@ export async function buildGroupContext(
   participants.set(currentUserId, currentUserName)
 
   const profiles = await buildProfiles(participants, currentUserId, config.contextMessageMaxChars)
-  const historyBudget = Math.max(0, budget - profiles.tokens)
+
+  const summaryRaw = (await getChatSummary(chatId)).trim()
+  const summaryLine = summaryRaw ? `Сводка предыдущего диалога: ${clip(summaryRaw, SUMMARY_MAX_CHARS)}` : ''
+  const summaryTokens = summaryLine ? estimateTokens(summaryLine) : 0
+
+  const historyBudget = Math.max(0, budget - profiles.tokens - summaryTokens)
   const acc: Accumulator = { tokens: 0, count: 0 }
 
   const history: ChatMessage[] = []
@@ -107,7 +116,9 @@ export async function buildGroupContext(
     }
   }
 
-  return [...profiles.messages, ...history.reverse()]
+  const context = [...profiles.messages]
+  if (summaryLine) context.push({ role: 'user', content: summaryLine })
+  return [...context, ...history.reverse()]
 }
 
 export async function buildDmContext(
@@ -138,6 +149,24 @@ export async function buildDmContext(
   }
 
   return [...profiles.messages, ...history.reverse()]
+}
+
+/** Сжимает историю группового чата в краткую сводку для последующего контекста. */
+export async function compressChat(chatId: number, config: Config): Promise<string> {
+  const feed = await chatMessages(chatId, config.maxContextMessages)
+  const lines: string[] = []
+  for (const m of feed) {
+    if (m.isPrompt) continue
+    lines.push(`${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`)
+  }
+  if (lines.length === 0) return ''
+  const content = lines.reverse().join('\n')
+  const messages: ChatMessage[] = [
+    { role: 'system', content: SUMMARIZE_PROMPT },
+    { role: 'user', content: content },
+  ]
+  const summary = await completeChat(config.openrouterApiKey, config.model, messages, config.maxTokens)
+  return summary.trim()
 }
 
 export function splitMessage(text: string, limit = 4096): string[] {

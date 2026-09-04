@@ -4,12 +4,15 @@ import type { Config } from './config.ts'
 import { loadConfig } from './config.ts'
 import {
   closeRedis,
+  getChatSummaryDate,
   getProfile,
   initRedis,
+  listUserGroupChats,
   resetChat,
   resetDm,
   saveChatMessage,
   saveDmMessage,
+  setChatSummary,
   setProfile,
   updateChatMessageText,
   type StoredMessage,
@@ -17,6 +20,7 @@ import {
 import {
   buildDmContext,
   buildGroupContext,
+  compressChat,
   formatCurrentPrompt,
   splitMessage,
   type PromptRequest,
@@ -46,6 +50,12 @@ function commandName(msg: Message): string | null {
   if (!e) return null
   const token = (msg.text ?? '').slice(e.offset, e.offset + e.length)
   return token.replace('/', '').split('@')[0]?.toLowerCase() ?? null
+}
+
+function commandArgs(msg: Message): string {
+  const e = (msg.entities ?? []).find((x) => x.type === 'bot_command')
+  if (!e) return ''
+  return (msg.text ?? '').slice(e.offset + e.length).trim()
 }
 
 function toStored(msg: Message, isPrompt: boolean, textOverride?: string): StoredMessage {
@@ -175,6 +185,61 @@ bot.on('message', async (ctx) => {
           { reply_to_message_id: msg.message_id },
         )
         break
+      case 'compress_chat':
+      case 'compress-chat': {
+        const uid = msg.from.id
+        const rest = commandArgs(msg)
+        if (!rest) {
+          const chats = await listUserGroupChats(uid)
+          if (chats.length === 0) {
+            await ctx.reply('Нет доступных групповых чатов, где ты находишься.', {
+              reply_to_message_id: msg.message_id,
+            })
+            break
+          }
+          const lines: string[] = []
+          for (const cid of chats) {
+            const d = await getChatSummaryDate(cid)
+            const dStr = d ? new Date(d * 1000).toLocaleString('ru-RU') : 'сводки нет'
+            lines.push(`- \`${cid}\` (${dStr})`)
+          }
+          await replyMarkdown(
+            ctx,
+            'Доступные чаты (для сжатия: /compress_chat <id>):\n' + lines.join('\n'),
+            { reply_to_message_id: msg.message_id },
+          )
+          break
+        }
+        const targetId = Number(rest)
+        if (!Number.isInteger(targetId)) {
+          await ctx.reply('Формат: /compress_chat <id>. Укажи числовой id чата.', {
+            reply_to_message_id: msg.message_id,
+          })
+          break
+        }
+        const chats = await listUserGroupChats(uid)
+        if (!chats.includes(targetId)) {
+          await ctx.reply(`Ты не найден в чате ${targetId}.`, { reply_to_message_id: msg.message_id })
+          break
+        }
+        await ctx.replyWithChatAction('typing')
+        const summary = await compressChat(targetId, config)
+        if (!summary) {
+          await ctx.reply('Не удалось сжать историю (пустой ответ модели).', {
+            reply_to_message_id: msg.message_id,
+          })
+          break
+        }
+        await setChatSummary(targetId, summary)
+        for (const [i, chunk] of splitMessage(summary).entries()) {
+          await replyMarkdown(
+            ctx,
+            `Сводка для чата \`${targetId}\`${i === 0 ? '' : ' (продолжение)'}:\n\n${chunk}`,
+            { reply_to_message_id: i === 0 ? msg.message_id : undefined },
+          )
+        }
+        break
+      }
       case 'profile': {
         const rest = stripCommand(msg.text ?? '', botUsername)
         const [mode, ...contentParts] = rest.split(/\s+/)
@@ -250,6 +315,7 @@ bot.on('message', async (ctx) => {
             '/start — приветствие и начало диалога\n' +
             '/profile — посмотреть профиль; /profile set|add <текст> — сохранить или дополнить\n' +
             '/ext_profile <id> — чужой профиль; set <id> <текст> — установить\n' +
+            '/compress_chat — список чатов; /compress_chat <id> — сжать историю чата\n' +
             '/reset — очистить историю чата\n' +
             '/help — список команд\n' +
             '/show_prompt — показать текущий системный промпт',
@@ -331,6 +397,7 @@ async function main(): Promise<void> {
     { command: 'start', description: 'Приветствие и начало диалога' },
     { command: 'profile', description: 'Профиль: просмотр, set/add <текст>, clear' },
     { command: 'ext_profile', description: 'Профиль другого юзера: <id> или set <id> <текст>' },
+    { command: 'compress_chat', description: 'Список чатов или сжать историю: <id>' },
     { command: 'reset', description: 'Очистить историю чата' },
     { command: 'show_prompt', description: 'Показать текущий системный промпт' },
     { command: 'help', description: 'Помощь' },
