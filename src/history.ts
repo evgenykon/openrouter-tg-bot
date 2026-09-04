@@ -109,7 +109,6 @@ export async function buildGroupContext(
 
   const history: ChatMessage[] = []
   for (const m of feed) {
-    if (m.isPrompt) continue
     const line = `${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`
     if (fits(acc, line, historyBudget, config.maxContextMessages, config.contextMessageMaxChars)) {
       history.push({ role: 'user', content: line })
@@ -156,7 +155,6 @@ export async function compressChat(chatId: number, config: Config): Promise<stri
   const feed = await chatMessages(chatId, config.maxContextMessages)
   const lines: string[] = []
   for (const m of feed) {
-    if (m.isPrompt) continue
     lines.push(`${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`)
   }
   if (lines.length === 0) return ''

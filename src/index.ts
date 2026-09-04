@@ -345,23 +345,16 @@ bot.on('message', async (ctx) => {
 
   if (isPrivate) {
     if (!allowed) return
-    await saveDmMessage(msg.from.id, toStored(msg, false))
     await answer(ctx, msg, () => buildDmContext(msg.from.id, config, displayName(msg)), {
       name: displayName(msg),
       text: msg.text ?? '',
       replyTo: replyToPrompt(msg),
     })
+    await saveDmMessage(msg.from.id, toStored(msg, false))
     return
   }
 
   const prompt = mention ? stripMention(msg.text ?? '', msg, botId, botUsername) : ''
-  await saveChatMessage(
-    ctx.chat.id,
-    toStored(msg, mention, mention ? prompt : undefined),
-  )
-
-  if (!allowed) return
-
   if (mention) {
     if (!prompt) {
       await ctx.reply('Напиши запрос после упоминания.', {
@@ -369,11 +362,19 @@ bot.on('message', async (ctx) => {
       })
       return
     }
+    if (!allowed) {
+      await saveChatMessage(ctx.chat.id, toStored(msg, true, prompt))
+      return
+    }
     await answer(ctx, msg, () => buildGroupContext(ctx.chat.id, config, msg.from.id, displayName(msg)), {
       name: displayName(msg),
       text: prompt,
       replyTo: replyToPrompt(msg),
     })
+    await saveChatMessage(ctx.chat.id, toStored(msg, true, prompt))
+  } else {
+    await saveChatMessage(ctx.chat.id, toStored(msg, false))
+    if (!allowed) return
   }
 })
 
@@ -405,6 +406,7 @@ async function main(): Promise<void> {
     { command: 'help', description: 'Помощь' },
   ]
   await bot.api.setMyCommands(commands)
+  await bot.api.setMyCommands(commands, { scope: { type: 'all_private_chats' } })
   await bot.api.setMyCommands(commands, { scope: { type: 'all_group_chats' } })
 
   const contextLength = await getModelContextLength(config.model, config.openrouterApiKey)
