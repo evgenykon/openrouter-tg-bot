@@ -1,0 +1,45 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Sync source to server (rsync)
+        run: |
+          PORT="${{ vars.DEPLOY_PORT || '22' }}"
+          TARGET="${{ vars.DEPLOY_TARGET || '/app/openrouter-tg-bot' }}"
+          rsync -az --delete \
+            --exclude node_modules \
+            --exclude data \
+            --exclude .env \
+            --exclude config.json \
+            --exclude .git \
+            --exclude .DS_Store \
+            -e "ssh -p ${PORT} -o StrictHostKeyChecking=no" \
+            ./ "${{ vars.DEPLOY_USER || 'deployer' }}@${{ vars.DEPLOY_HOST }}:${TARGET}/"
+          # config.json, .env, data/ исключены из синка и защищены от --delete
+
+      - name: Rebuild and restart
+        run: |
+          PORT="${{ vars.DEPLOY_PORT || '22' }}"
+          TARGET="${{ vars.DEPLOY_TARGET || '/app/openrouter-tg-bot' }}"
+          ssh -p "${PORT}" -o StrictHostKeyChecking=no \
+            "${{ vars.DEPLOY_USER || 'deployer' }}@${{ vars.DEPLOY_HOST }}" \
+            "cd '${TARGET}' && docker compose up -d --build"

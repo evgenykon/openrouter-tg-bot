@@ -60,6 +60,42 @@ Telegram-бот, который добавляется в группу и отв
 
 Команды видны в подсказке, когда начинаешь писать `@bot` в группе, и в меню.
 
+## Деплой через GitHub Actions
+
+Push в ветку `main` автоматически запускает `.github/workflows/deploy.yml`:
+исходники заливаются на сервер **по SSH через `rsync`**, затем выполняется
+`docker compose up -d --build`. Git на сервере не обязателен. Репозиторий
+может быть приватным — серверу не нужен доступ к GitHub.
+
+Файлы `config.json`, `.env` и `data/` в git не хранятся — они остаются только
+на сервере. При rsync они исключены из передачи и защищены от удаления
+(`--delete` + `--exclude`, без `--delete-excluded`), поэтому при деплое
+не перезаписываются и не удаляются.
+
+Работает с GitHub Environments. Job объявляет `environment: prod`, поэтому
+переменные берутся из Environments → `prod` → **Variables**, а ключ —
+из Environments → `prod` → **Secrets**.
+
+**Environments → `prod` → Variables:**
+
+| Variable | Значение |
+| --- | --- |
+| `DEPLOY_HOST` | IP/хост сервера (`23.227.194.192`) |
+| `DEPLOY_USER` | SSH-пользователь (`deployer`) |
+| `DEPLOY_TARGET` | путь к проекту на сервере (по умолчанию `/app/openrouter-tg-bot`) |
+| `DEPLOY_PORT` | опционально, порт SSH (по умолчанию `22`) |
+
+**Environments → `prod` → Secrets:**
+
+| Secret | Значение |
+| --- | --- |
+| `DEPLOY_SSH_KEY` | приватный SSH-ключ `deployer`; публичный — на сервере в `~deployer/.ssh/authorized_keys` |
+
+Пользователь `deployer` должен иметь права на запись в `DEPLOY_TARGET` и доступ
+к docker-сокету (`sudo usermod -aG docker deployer`). После первого успешного
+деплоя рекомендуется включить строгую проверку host key
+(убрать `StrictHostKeyChecking=no`).
+
 ## Разработка
 
 ```sh
