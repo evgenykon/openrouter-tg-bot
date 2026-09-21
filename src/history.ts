@@ -1,10 +1,16 @@
 import type { Config } from './config.ts'
-import { chatMessages, dmMessages, getChatSummary, getProfile } from './db.ts'
-import { completeChat, estimateTokens, getModelContextLength, type ChatMessage } from './openrouter.ts'
-
-const SUMMARY_MAX_CHARS = 2000
-const SUMMARIZE_PROMPT =
-  'Ты — инструмент сжатия истории чата для долгосрочного контекста. Сохрани ключевое: участники, обсуждаемые темы, важные события, договорённости, эмоционально значимые моменты, незакрытые вопросы и общий контекст отношений. Пиши кратко, связно, на языке диалога. Не выдумывай и не добавляй лишнего.'
+import {
+  chatParticipants,
+  chatSpace,
+  compressedDays,
+  dmSpace,
+  getContext,
+  getProfile,
+  messagesForDay,
+  rawDays,
+  type Space,
+} from './db.ts'
+import { estimateTokens, getModelContextLength, type ChatMessage } from './openrouter.ts'
 
 export interface PromptRequest {
   name: string
@@ -20,8 +26,8 @@ export function formatCurrentPrompt(p: PromptRequest): string {
   return out
 }
 
-function clip(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text
+export function clip(text: string, maxChars: number): string {
+  if (maxChars <= 0 || text.length <= maxChars) return text
   return `${text.slice(0, maxChars)}…`
 }
 
@@ -82,6 +88,48 @@ async function buildProfiles(
   return { messages, tokens }
 }
 
+/** Сырые сообщения только непожатых дней (в норме — текущий день), хронологически. */
+async function collectHistoryLines(s: Space, config: Config): Promise<string[]> {
+  const done = new Set(await compressedDays(s))
+  const pending = (await rawDays(s)).filter((day) => !done.has(day)).sort()
+  const lines: string[] = []
+  for (const day of pending) {
+    const msgs = await messagesForDay(s, day)
+    for (const m of msgs) {
+      lines.push(`${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`)
+    }
+  }
+  return lines
+}
+
+function assembleContext(
+  profiles: ProfileBlock,
+  contextText: string,
+  historyLines: string[],
+  budget: number,
+  config: Config,
+): ChatMessage[] {
+  const contextLine = contextText
+    ? `Контекст предыдущих дней:\n${clip(contextText, config.contextMaxChars)}`
+    : ''
+  const contextTokens = contextLine ? estimateTokens(contextLine) : 0
+  const historyBudget = Math.max(0, budget - profiles.tokens - contextTokens)
+
+  const acc: Accumulator = { tokens: 0, count: 0 }
+  const history: ChatMessage[] = []
+  for (let i = historyLines.length - 1; i >= 0; i--) {
+    const line = historyLines[i]
+    if (line === undefined) continue
+    if (fits(acc, line, historyBudget, config.maxContextMessages, config.contextMessageMaxChars)) {
+      history.push({ role: 'user', content: line })
+    }
+  }
+
+  const out: ChatMessage[] = [...profiles.messages]
+  if (contextLine) out.push({ role: 'user', content: contextLine })
+  return [...out, ...history.reverse()]
+}
+
 export async function buildGroupContext(
   chatId: number,
   config: Config,
@@ -89,35 +137,16 @@ export async function buildGroupContext(
   currentUserName: string,
 ): Promise<ChatMessage[]> {
   const budget = await computeBudget(config)
+  const s = chatSpace(chatId)
 
-  const feed = await chatMessages(chatId, config.maxContextMessages)
-  const participants = new Map<number, string>()
-  for (const m of feed) {
-    if (m.isBot || m.userId === 0) continue
-    participants.set(m.userId, m.name)
-  }
+  const participants = await chatParticipants(chatId)
   participants.set(currentUserId, currentUserName)
 
   const profiles = await buildProfiles(participants, currentUserId, config.contextMessageMaxChars)
+  const contextText = (await getContext(s)).trim()
+  const historyLines = await collectHistoryLines(s, config)
 
-  const summaryRaw = (await getChatSummary(chatId)).trim()
-  const summaryLine = summaryRaw ? `Сводка предыдущего диалога: ${clip(summaryRaw, SUMMARY_MAX_CHARS)}` : ''
-  const summaryTokens = summaryLine ? estimateTokens(summaryLine) : 0
-
-  const historyBudget = Math.max(0, budget - profiles.tokens - summaryTokens)
-  const acc: Accumulator = { tokens: 0, count: 0 }
-
-  const history: ChatMessage[] = []
-  for (const m of feed) {
-    const line = `${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`
-    if (fits(acc, line, historyBudget, config.maxContextMessages, config.contextMessageMaxChars)) {
-      history.push({ role: 'user', content: line })
-    }
-  }
-
-  const context = [...profiles.messages]
-  if (summaryLine) context.push({ role: 'user', content: summaryLine })
-  return [...context, ...history.reverse()]
+  return assembleContext(profiles, contextText, historyLines, budget, config)
 }
 
 export async function buildDmContext(
@@ -126,45 +155,20 @@ export async function buildDmContext(
   userName: string,
 ): Promise<ChatMessage[]> {
   const budget = await computeBudget(config)
+  const s = dmSpace(userId)
 
-  const profile = await getProfile(userId)
   const profiles: ProfileBlock = { messages: [], tokens: 0 }
-  if (profile.trim()) {
-    const line = `Профиль пользователя ${userName} (личные данные, используй для аналитики и вопросов): ${clip(profile.trim(), config.contextMessageMaxChars)}`
+  const profile = (await getProfile(userId)).trim()
+  if (profile) {
+    const line = `Профиль пользователя ${userName} (личные данные, используй для аналитики и вопросов): ${clip(profile, config.contextMessageMaxChars)}`
     profiles.messages.push({ role: 'user', content: line })
     profiles.tokens += estimateTokens(line)
   }
 
-  const historyBudget = Math.max(0, budget - profiles.tokens)
-  const acc: Accumulator = { tokens: 0, count: 0 }
+  const contextText = (await getContext(s)).trim()
+  const historyLines = await collectHistoryLines(s, config)
 
-  const feed = await dmMessages(userId, config.maxContextMessages)
-  const history: ChatMessage[] = []
-  for (const m of feed) {
-    const line = `${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`
-    if (fits(acc, line, historyBudget, config.maxContextMessages, config.contextMessageMaxChars)) {
-      history.push({ role: 'user', content: line })
-    }
-  }
-
-  return [...profiles.messages, ...history.reverse()]
-}
-
-/** Сжимает историю группового чата в краткую сводку для последующего контекста. */
-export async function compressChat(chatId: number, config: Config): Promise<string> {
-  const feed = await chatMessages(chatId, config.maxContextMessages)
-  const lines: string[] = []
-  for (const m of feed) {
-    lines.push(`${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`)
-  }
-  if (lines.length === 0) return ''
-  const content = lines.reverse().join('\n')
-  const messages: ChatMessage[] = [
-    { role: 'system', content: SUMMARIZE_PROMPT },
-    { role: 'user', content: content },
-  ]
-  const summary = await completeChat(config.openrouterApiKey, config.model, messages, config.maxTokens)
-  return summary.trim()
+  return assembleContext(profiles, contextText, historyLines, budget, config)
 }
 
 export function splitMessage(text: string, limit = 4096): string[] {

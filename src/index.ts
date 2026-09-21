@@ -2,9 +2,12 @@ import { Bot, GrammyError, type Context } from 'grammy'
 import type { Message } from '@grammyjs/types'
 import type { Config } from './config.ts'
 import { loadConfig } from './config.ts'
+import { runCompressor } from './compress.ts'
 import {
+  chatParticipants,
+  chatStore,
   closeRedis,
-  getChatSummaryDate,
+  dmStore,
   getProfile,
   initRedis,
   listUserGroupChats,
@@ -12,7 +15,6 @@ import {
   resetDm,
   saveChatMessage,
   saveDmMessage,
-  setChatSummary,
   setProfile,
   updateChatMessageText,
   type StoredMessage,
@@ -20,11 +22,11 @@ import {
 import {
   buildDmContext,
   buildGroupContext,
-  compressChat,
   formatCurrentPrompt,
   splitMessage,
   type PromptRequest,
 } from './history.ts'
+import { ERR_MODEL, formatModelError } from './notices.ts'
 import {
   displayName,
   displayNameOf,
@@ -33,7 +35,13 @@ import {
   stripCommand,
   stripMention,
 } from './mentions.ts'
-import { getModelContextLength, streamAnswer, type ChatMessage } from './openrouter.ts'
+import {
+  completeChat,
+  getModelContextLength,
+  OpenRouterError,
+  streamAnswer,
+  type ChatMessage,
+} from './openrouter.ts'
 
 const config: Config = loadConfig()
 
@@ -85,6 +93,51 @@ async function replyMarkdown(
   }
 }
 
+/** Отправка служебного текста напрямую, без записи в историю и без markdown. */
+async function sendPlain(chatId: number, text: string): Promise<void> {
+  try {
+    for (const chunk of splitMessage(text)) {
+      await bot.api.sendMessage(chatId, chunk)
+    }
+  } catch (err) {
+    console.error('[notify]', err)
+  }
+}
+
+async function compressIfNeeded(ctx: Context, msg: Message): Promise<void> {
+  if (!config.compressEnabled || !msg.from) return
+  const isPrivate = msg.chat.type === 'private'
+  const targetChatId = isPrivate ? msg.from.id : msg.chat.id
+  const store = isPrivate ? dmStore(msg.from.id) : chatStore(msg.chat.id)
+
+  try {
+    // переиндексация нужна до чтения участников (миграция старых чатов)
+    await store.reindexDays()
+    let participants: string[]
+    if (isPrivate) {
+      participants = [displayName(msg)]
+    } else {
+      const map = await chatParticipants(msg.chat.id)
+      map.set(msg.from.id, displayName(msg))
+      participants = [...map.values()]
+    }
+
+    await runCompressor({
+      store,
+      complete: (messages) =>
+        completeChat(config.openrouterApiKey, config.model, messages, config.maxTokens),
+      participants,
+      contextMaxChars: config.contextMaxChars,
+      messageMaxChars: config.contextMessageMaxChars,
+      notify: (text) => sendPlain(targetChatId, text),
+      log: (message) => console.log(`[compress] chat=${targetChatId} ${message}`),
+    })
+  } catch (err) {
+    console.error(`[compress] chat=${targetChatId} fatal`, err)
+    await sendPlain(targetChatId, ERR_MODEL)
+  }
+}
+
 async function answer(
   ctx: Context,
   msg: Message,
@@ -93,6 +146,8 @@ async function answer(
 ): Promise<void> {
   try {
     await ctx.replyWithChatAction('typing')
+    await compressIfNeeded(ctx, msg)
+
     const context = await buildContext()
     const promptText = formatCurrentPrompt(prompt)
 
@@ -111,7 +166,12 @@ async function answer(
       console.log(`  ${m.role}: ${m.content}`)
     }
 
-    for await (const delta of streamAnswer(config.openrouterApiKey, config.model, messages, config.maxTokens)) {
+    for await (const delta of streamAnswer(
+      config.openrouterApiKey,
+      config.model,
+      messages,
+      config.maxTokens,
+    )) {
       full += delta
       if (Date.now() - lastTyping > 4000) {
         lastTyping = Date.now()
@@ -122,12 +182,17 @@ async function answer(
     console.log(`AI ----> Bot chat=${msg.chat.id} user=${msg.from?.id}`, full || '(empty)')
     if (!full.trim()) {
       console.log(`[error] chat=${msg.chat.id} user=${msg.from?.id} пустой ответ от модели`)
+      await ctx.reply(ERR_MODEL, { reply_to_message_id: msg.message_id }).catch(() => {})
       return
     }
     const chunks = splitMessage(full)
     let firstId: number | undefined
     for (const [i, chunk] of chunks.entries()) {
-      const sent = await replyMarkdown(ctx, chunk, i === 0 ? { reply_to_message_id: msg.message_id } : {})
+      const sent = await replyMarkdown(
+        ctx,
+        chunk,
+        i === 0 ? { reply_to_message_id: msg.message_id } : {},
+      )
       if (i === 0 && sent) firstId = sent.message_id
     }
     if (firstId !== undefined) {
@@ -145,6 +210,8 @@ async function answer(
     }
   } catch (err) {
     console.error(`[error] chat=${msg.chat.id} user=${msg.from?.id}`, err)
+    const text = err instanceof OpenRouterError ? formatModelError(err) : ERR_MODEL
+    await ctx.reply(text, { reply_to_message_id: msg.message_id }).catch(() => {})
   }
 }
 
@@ -152,6 +219,30 @@ function replyToPrompt(msg: Message): PromptRequest['replyTo'] {
   const r = msg.reply_to_message
   if (!r?.text || !r.from) return undefined
   return { name: displayNameOf(r.from), text: r.text }
+}
+
+async function chatStatus(chatId: number): Promise<string> {
+  const store = chatStore(chatId)
+  const days = await store.compressedDays()
+  const last = days.at(-1) ?? 'нет'
+  const size = (await store.getContext()).length
+  return `последний сжатый день: ${last}, блок контекста: ${size} симв.`
+}
+
+async function forceCompress(notifyChatId: number, chatId: number): Promise<void> {
+  const store = chatStore(chatId)
+  await store.reindexDays()
+  const participants = [...(await chatParticipants(chatId)).values()]
+  await runCompressor({
+    store,
+    complete: (messages) =>
+      completeChat(config.openrouterApiKey, config.model, messages, config.maxTokens),
+    participants,
+    contextMaxChars: config.contextMaxChars,
+    messageMaxChars: config.contextMessageMaxChars,
+    notify: (text) => sendPlain(notifyChatId, text),
+    log: (message) => console.log(`[compress] chat=${chatId} ${message}`),
+  })
 }
 
 bot.on('message', async (ctx) => {
@@ -199,9 +290,7 @@ bot.on('message', async (ctx) => {
           }
           const lines: string[] = []
           for (const cid of chats) {
-            const d = await getChatSummaryDate(cid)
-            const dStr = d ? new Date(d * 1000).toLocaleString('ru-RU') : 'сводки нет'
-            lines.push(`- \`${cid}\` (${dStr})`)
+            lines.push(`- \`${cid}\`: ${await chatStatus(cid)}`)
           }
           await replyMarkdown(
             ctx,
@@ -225,20 +314,14 @@ bot.on('message', async (ctx) => {
           break
         }
         await ctx.replyWithChatAction('typing')
-        const summary = await compressChat(targetId, config)
-        if (!summary) {
-          await ctx.reply('Не удалось сжать историю (пустой ответ модели).', {
+        try {
+          await forceCompress(chatId, targetId)
+          await ctx.reply(`Готово. ${await chatStatus(targetId)}`, {
             reply_to_message_id: msg.message_id,
           })
-          break
-        }
-        await setChatSummary(targetId, summary)
-        for (const [i, chunk] of splitMessage(summary).entries()) {
-          await replyMarkdown(
-            ctx,
-            `Сводка для чата \`${targetId}\`${i === 0 ? '' : ' (продолжение)'}:\n\n${chunk}`,
-            { reply_to_message_id: i === 0 ? msg.message_id : undefined },
-          )
+        } catch (err) {
+          console.error(`[compress] chat=${targetId} fatal`, err)
+          await ctx.reply(formatModelError(err), { reply_to_message_id: msg.message_id })
         }
         break
       }
@@ -306,10 +389,17 @@ bot.on('message', async (ctx) => {
         break
       }
       case 'start':
-        await answer(ctx, msg, isPrivate ? () => buildDmContext(msg.from.id, config, displayName(msg)) : () => buildGroupContext(chatId, config, msg.from.id, displayName(msg)), {
-          name: displayName(msg),
-          text: 'Начало диалога. Поздоровайся со мной и задай свой вступительный вопрос, чтобы мы начали разбираться.',
-        })
+        await answer(
+          ctx,
+          msg,
+          isPrivate
+            ? () => buildDmContext(msg.from.id, config, displayName(msg))
+            : () => buildGroupContext(chatId, config, msg.from.id, displayName(msg)),
+          {
+            name: displayName(msg),
+            text: 'Начало диалога. Поздоровайся со мной и задай свой вступительный вопрос, чтобы мы начали разбираться.',
+          },
+        )
         break
       case 'help':
         await ctx.reply(
@@ -317,7 +407,7 @@ bot.on('message', async (ctx) => {
             '/start — приветствие и начало диалога\n' +
             '/profile — посмотреть профиль; /profile set|add <текст> — сохранить или дополнить\n' +
             '/ext_profile <id> — чужой профиль; set <id> <текст> — установить\n' +
-            '/compress_chat — список чатов; /compress_chat <id> — сжать историю чата\n' +
+            '/compress_chat — статус чатов; /compress_chat <id> — сжать историю чата\n' +
             '/reset — очистить историю чата\n' +
             '/help — список команд\n' +
             '/show_prompt — показать текущий системный промпт',
@@ -388,8 +478,13 @@ bot.on('edited_message', async (ctx) => {
   await updateChatMessageText(ctx.chat.id, msg.message_id, text, mention)
 })
 
-bot.catch((err) => {
+bot.catch(async (err) => {
   console.error('[bot]', err.error)
+  try {
+    await err.ctx.reply(ERR_MODEL)
+  } catch {
+    // не удалось сообщить об ошибке — остаётся только лог
+  }
 })
 
 async function main(): Promise<void> {
@@ -400,7 +495,7 @@ async function main(): Promise<void> {
     { command: 'start', description: 'Приветствие и начало диалога' },
     { command: 'profile', description: 'Профиль: просмотр, set/add <текст>, clear' },
     { command: 'ext_profile', description: 'Профиль другого юзера: <id> или set <id> <текст>' },
-    { command: 'compress_chat', description: 'Список чатов или сжать историю: <id>' },
+    { command: 'compress_chat', description: 'Статус чатов или сжать историю: <id>' },
     { command: 'reset', description: 'Очистить историю чата' },
     { command: 'show_prompt', description: 'Показать текущий системный промпт' },
     { command: 'help', description: 'Помощь' },

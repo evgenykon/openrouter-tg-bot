@@ -14,6 +14,8 @@ export interface Config {
   safetyMarginPercent: number
   maxTokens: number
   contextMessageMaxChars: number
+  contextMaxChars: number
+  compressEnabled: boolean
 }
 
 function loadDotEnv(path: string): void {
@@ -42,6 +44,11 @@ function reqString(env: Record<string, string | undefined>, name: string): strin
 function num(json: Record<string, unknown>, name: string, fallback: number): number {
   const v = json[name]
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback
+}
+
+function bool(json: Record<string, unknown>, name: string, fallback: boolean): boolean {
+  const v = json[name]
+  return typeof v === 'boolean' ? v : fallback
 }
 
 export function loadConfig(): Config {
@@ -76,5 +83,7 @@ export function loadConfig(): Config {
     safetyMarginPercent: num(json, 'safetyMarginPercent', 30),
     maxTokens: num(json, 'maxTokens', 1024),
     contextMessageMaxChars: num(json, 'contextMessageMaxChars', 1000),
+    contextMaxChars: num(json, 'contextMaxChars', 6000),
+    compressEnabled: bool(json, 'compressEnabled', true),
   }
 }
