@@ -17,6 +17,7 @@ export interface Config {
   contextMaxChars: number
   compressEnabled: boolean
   reasoningMaxTokens: number
+  compressModel: string
 }
 
 function loadDotEnv(path: string): void {
@@ -87,5 +88,9 @@ export function loadConfig(): Config {
     contextMaxChars: num(json, 'contextMaxChars', 6000),
     compressEnabled: bool(json, 'compressEnabled', true),
     reasoningMaxTokens: num(json, 'reasoningMaxTokens', 4096),
+    compressModel:
+      typeof json.compressModel === 'string' && json.compressModel.trim()
+        ? json.compressModel
+        : 'deepseek/deepseek-chat',
   }
 }

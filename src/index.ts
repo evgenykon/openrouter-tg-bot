@@ -127,7 +127,7 @@ async function compressIfNeeded(ctx: Context, msg: Message): Promise<void> {
       complete: (messages) =>
         completeChat(
           config.openrouterApiKey,
-          config.model,
+          config.compressModel,
           messages,
           config.maxTokens,
           config.reasoningMaxTokens,
@@ -189,10 +189,14 @@ async function answer(
       return out
     }
 
-    let full = await collect()
-    if (!full.trim()) {
-      console.log(`[warn] chat=${msg.chat.id} user=${msg.from?.id} пустой ответ, повтор запроса`)
+    const MAX_ATTEMPTS = 3
+    let full = ''
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       full = await collect()
+      if (full.trim()) break
+      console.log(
+        `[warn] chat=${msg.chat.id} user=${msg.from?.id} пустой ответ, попытка ${attempt}/${MAX_ATTEMPTS}`,
+      )
     }
 
     console.log(`AI ----> Bot chat=${msg.chat.id} user=${msg.from?.id}`, full || '(empty)')
@@ -254,7 +258,7 @@ async function forceCompress(notifyChatId: number, chatId: number): Promise<void
     complete: (messages) =>
       completeChat(
         config.openrouterApiKey,
-        config.model,
+        config.compressModel,
         messages,
         config.maxTokens,
         config.reasoningMaxTokens,

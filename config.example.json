@@ -10,5 +10,6 @@
   "contextMessageMaxChars": 1000,
   "contextMaxChars": 6000,
   "compressEnabled": true,
-  "reasoningMaxTokens": 4096
+  "reasoningMaxTokens": 4096,
+  "compressModel": "deepseek/deepseek-chat"
 }

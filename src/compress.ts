@@ -96,6 +96,7 @@ export async function runCompressor(deps: CompressorDeps): Promise<void> {
           await deps.complete(buildDaySummaryMessages(deps.participants, content)),
         )
         if (!summary) {
+          log(`empty summary for day ${day}, stopping`)
           await deps.notify(formatDayCompressError(day, 'пустой ответ модели'))
           break
         }

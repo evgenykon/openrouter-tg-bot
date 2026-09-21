@@ -90,22 +90,32 @@ export async function completeChat(
   messages: ChatMessage[],
   maxTokens: number,
   reasoningMaxTokens?: number,
+  attempts = 3,
 ): Promise<string> {
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: chatRequestBody(model, messages, maxTokens, false, reasoningMaxTokens),
-    signal: AbortSignal.timeout(180_000),
-  })
-  if (!res.ok) await throwHttpError(res)
+  let last = ''
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: chatRequestBody(model, messages, maxTokens, false, reasoningMaxTokens),
+      signal: AbortSignal.timeout(180_000),
+    })
+    if (!res.ok) await throwHttpError(res)
 
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
+    const data = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>
+    }
+    const content = data.choices?.[0]?.message?.content?.trim() ?? ''
+    if (content) return content
+    last = ''
+    if (attempt < attempts) {
+      console.log(`[openrouter] пустой ответ (${model}), попытка ${attempt}/${attempts}`)
+    }
   }
-  return data.choices?.[0]?.message?.content?.trim() ?? ''
+  return last
 }
 
 /** Стриминговый вызов: отдаёт фрагменты текста по мере прихода из SSE. */
