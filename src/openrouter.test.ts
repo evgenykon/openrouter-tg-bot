@@ -1,6 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chatRequestBody, completeChat, estimateTokens, type ChatMessage } from './openrouter.ts'
+import {
+  chatRequestBody,
+  completeChat,
+  estimateTokens,
+  retryDelays,
+  type ChatMessage,
+} from './openrouter.ts'
+
+retryDelays.emptyMs = 0
+retryDelays.errorMs = 0
 
 const messages: ChatMessage[] = [{ role: 'user', content: 'привет' }]
 
@@ -26,6 +35,25 @@ test('completeChat повторяет запрос при пустом отве�
     assert.equal(stub.calls(), 3)
   } finally {
     stub.restore()
+  }
+})
+
+test('completeChat повторяет запрос при 429', async () => {
+  const original = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = (async () => {
+    calls++
+    if (calls < 3) return new Response('{"error":"rate"}', { status: 429 })
+    return new Response(JSON.stringify({ choices: [{ message: { content: 'ок' } }] }), {
+      status: 200,
+    })
+  }) as typeof fetch
+  try {
+    const out = await completeChat('k', 'm', messages, 100)
+    assert.equal(out, 'ок')
+    assert.equal(calls, 3)
+  } finally {
+    globalThis.fetch = original
   }
 })
 

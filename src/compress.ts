@@ -41,6 +41,12 @@ export interface CompressorDeps {
   notify: (text: string) => Promise<void>
   now?: () => Date
   log?: (message: string) => void
+  /** Пауза между днями, мс — чтобы не упираться в rate limit модели. */
+  delayMs?: number
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 const LOCK_TTL_SECONDS = 300
@@ -133,6 +139,7 @@ export async function runCompressor(deps: CompressorDeps): Promise<void> {
         await deps.notify(
           formatDayCompressedNotice(day, dayBefore, summary.length, prevContext.length, context.length),
         )
+        if (deps.delayMs && deps.delayMs > 0) await sleep(deps.delayMs)
       } catch (err) {
         log(`failed to compress day ${day}: ${String(err)}`)
         await deps.notify(formatDayCompressError(day, errorReason(err)))

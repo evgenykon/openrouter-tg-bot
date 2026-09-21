@@ -5,7 +5,21 @@ export interface ChatMessage {
 
 const contextLengthCache = new Map<string, number>()
 
-export class OpenRouterError extends Error {}
+export class OpenRouterError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message)
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Паузы ретраев (мс), умножаются на номер попытки. Настраиваются в тестах. */
+export const retryDelays = { emptyMs: 2_000, errorMs: 8_000 }
 
 export async function getModelContextLength(
   model: string,
@@ -46,10 +60,10 @@ export function estimateTokens(text: string): number {
 
 async function throwHttpError(res: Response): Promise<never> {
   if (res.status === 429) {
-    throw new OpenRouterError('Слишком много запросов к модели, попробуй чуть позже.')
+    throw new OpenRouterError('Слишком много запросов к модели, попробуй чуть позже.', 429)
   }
   if (res.status === 402) {
-    throw new OpenRouterError('Недостаточно средств на аккаунте OpenRouter.')
+    throw new OpenRouterError('Недостаточно средств на аккаунте OpenRouter.', 402)
   }
   let detail = `HTTP ${res.status}`
   try {
@@ -59,7 +73,7 @@ async function throwHttpError(res: Response): Promise<never> {
   } catch {
     // тело не JSON — оставляем HTTP-статус
   }
-  throw new OpenRouterError(`Ошибка OpenRouter: ${detail}`)
+  throw new OpenRouterError(`Ошибка OpenRouter: ${detail}`, res.status)
 }
 
 export function chatRequestBody(
@@ -94,25 +108,39 @@ export async function completeChat(
 ): Promise<string> {
   let last = ''
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: chatRequestBody(model, messages, maxTokens, false, reasoningMaxTokens),
-      signal: AbortSignal.timeout(180_000),
-    })
-    if (!res.ok) await throwHttpError(res)
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: chatRequestBody(model, messages, maxTokens, false, reasoningMaxTokens),
+        signal: AbortSignal.timeout(300_000),
+      })
+      if (!res.ok) await throwHttpError(res)
 
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>
-    }
-    const content = data.choices?.[0]?.message?.content?.trim() ?? ''
-    if (content) return content
-    last = ''
-    if (attempt < attempts) {
-      console.log(`[openrouter] пустой ответ (${model}), попытка ${attempt}/${attempts}`)
+      const data = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>
+      }
+      const content = data.choices?.[0]?.message?.content?.trim() ?? ''
+      if (content) return content
+      last = ''
+      if (attempt < attempts) {
+        console.log(`[openrouter] пустой ответ (${model}), попытка ${attempt}/${attempts}`)
+        await sleep(retryDelays.emptyMs * attempt)
+      }
+    } catch (err) {
+      // 429 и сетевые таймауты — повторяем с нарастающей паузой; 402 не повторяем
+      const retryable = err instanceof OpenRouterError ? err.status === 429 : true
+      if (retryable && attempt < attempts) {
+        console.log(
+          `[openrouter] ошибка (${model}), попытка ${attempt}/${attempts}: ${String(err)}`,
+        )
+        await sleep(retryDelays.errorMs * attempt)
+        continue
+      }
+      throw err
     }
   }
   return last

@@ -138,6 +138,7 @@ async function compressIfNeeded(ctx: Context, msg: Message): Promise<void> {
       messageMaxChars: config.contextMessageMaxChars,
       notify: (text) => sendPlain(targetChatId, text),
       log: (message) => console.log(`[compress] chat=${targetChatId} ${message}`),
+      delayMs: 2000,
     })
   } catch (err) {
     console.error(`[compress] chat=${targetChatId} fatal`, err)
@@ -277,6 +278,7 @@ async function forceCompress(notifyChatId: number, chatId: number): Promise<void
     messageMaxChars: config.contextMessageMaxChars,
     notify: (text) => sendPlain(notifyChatId, text),
     log: (message) => console.log(`[compress] chat=${chatId} ${message}`),
+    delayMs: 2000,
   })
 }
 
