@@ -13,6 +13,10 @@ test('промпт мержа требует даты у каждой темы',
   assert.match(CONTEXT_MERGE_SYSTEM, /YYYY-MM-DD/)
 })
 
+test('промпт мержа запрещает даты для необсуждавшихся тем', () => {
+  assert.match(CONTEXT_MERGE_SYSTEM, /Не добавляй дату, если тема в этот день не обсуждалась/)
+})
+
 test('промпт консолидации сохраняет даты', () => {
   assert.match(CONTEXT_CONSOLIDATE_SYSTEM, /Даты:/)
 })
