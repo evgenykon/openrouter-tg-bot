@@ -26,6 +26,7 @@ export interface CompressorStore {
   setContext(text: string): Promise<void>
   pruneDay(day: string): Promise<void>
   tryLock(ttlSeconds: number): Promise<boolean>
+  touchLock(ttlSeconds: number): Promise<void>
   unlock(): Promise<void>
 }
 
@@ -112,9 +113,11 @@ export async function runCompressor(deps: CompressorDeps): Promise<void> {
           const consolidated = stripMarkup(
             await deps.complete(buildConsolidateMessages(deps.participants, context)),
           )
-          if (consolidated) {
+          if (consolidated && consolidated.length < before) {
             context = consolidated
             await deps.notify(formatConsolidatedNotice(before, context.length))
+          } else if (consolidated) {
+            log(`consolidation did not shrink context (${before} -> ${consolidated.length})`)
           }
         }
 
@@ -122,6 +125,7 @@ export async function runCompressor(deps: CompressorDeps): Promise<void> {
         await store.setContext(context)
         await store.markDayCompressed(day)
         await store.pruneDay(day)
+        await store.touchLock(LOCK_TTL_SECONDS)
 
         log(`compressed day ${day}: ${dayBefore} -> ${summary.length} chars`)
         await deps.notify(

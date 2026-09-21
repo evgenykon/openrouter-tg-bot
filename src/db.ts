@@ -231,6 +231,10 @@ export async function tryLockCompress(s: Space, ttlSeconds: number): Promise<boo
   return res === 'OK'
 }
 
+export async function refreshLockCompress(s: Space, ttlSeconds: number): Promise<void> {
+  await client.expire(lockKey(s), ttlSeconds)
+}
+
 export async function unlockCompress(s: Space): Promise<void> {
   await client.del(lockKey(s))
 }
@@ -362,6 +366,7 @@ function storeFor(s: Space): CompressorStore {
     setContext: (text) => setContext(s, text),
     pruneDay: (day) => pruneDay(s, day),
     tryLock: (ttl) => tryLockCompress(s, ttl),
+    touchLock: (ttl) => refreshLockCompress(s, ttl),
     unlock: () => unlockCompress(s),
   }
 }

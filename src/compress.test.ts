@@ -51,6 +51,7 @@ class FakeStore implements CompressorStore {
   async tryLock(): Promise<boolean> {
     return this.lockFree
   }
+  async touchLock(): Promise<void> {}
   async unlock(): Promise<void> {}
 }
 
@@ -168,6 +169,22 @@ test('консолидация блока при превышении лимит
   const joined = notices.join('\n')
   assert.match(joined, /Произведена консолидация блока контекста/)
   assert.match(joined, /за дату 2026-09-20/)
+})
+
+test('если консолидация не уменьшила блок — оставляем прежний без уведомления', async () => {
+  const store = new FakeStore()
+  store.raw.set('2026-09-20', [msg(1, 'Аня', 'aaa', 0)])
+  const complete = async (messages: ChatMessage[]): Promise<string> => {
+    const sys = messages[0]?.content ?? ''
+    if (sys.includes('сжатия одного дня')) return 'сводка'
+    if (sys.includes('Сожми блок')) return 'y'.repeat(200)
+    if (sys.includes('долгосрочный блок')) return 'x'.repeat(100)
+    return ''
+  }
+  const { deps: d, notices } = deps(store, complete, { contextMaxChars: 20 })
+  await runCompressor(d)
+  assert.equal(store.context, 'x'.repeat(100))
+  assert.doesNotMatch(notices.join('\n'), /консолидация/)
 })
 
 test('если лок занят — сжатие пропускается без уведомлений', async () => {
