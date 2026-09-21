@@ -125,7 +125,13 @@ async function compressIfNeeded(ctx: Context, msg: Message): Promise<void> {
     await runCompressor({
       store,
       complete: (messages) =>
-        completeChat(config.openrouterApiKey, config.model, messages, config.maxTokens),
+        completeChat(
+          config.openrouterApiKey,
+          config.model,
+          messages,
+          config.maxTokens,
+          config.reasoningMaxTokens,
+        ),
       participants,
       contextMaxChars: config.contextMaxChars,
       messageMaxChars: config.contextMessageMaxChars,
@@ -151,8 +157,6 @@ async function answer(
     const context = await buildContext()
     const promptText = formatCurrentPrompt(prompt)
 
-    let full = ''
-    let lastTyping = Date.now()
     const systemPrompt =
       msg.chat.type === 'private' ? config.privateSystemPrompt : config.systemPrompt
     const messages: ChatMessage[] = [
@@ -166,17 +170,29 @@ async function answer(
       console.log(`  ${m.role}: ${m.content}`)
     }
 
-    for await (const delta of streamAnswer(
-      config.openrouterApiKey,
-      config.model,
-      messages,
-      config.maxTokens,
-    )) {
-      full += delta
-      if (Date.now() - lastTyping > 4000) {
-        lastTyping = Date.now()
-        await ctx.replyWithChatAction('typing').catch(() => {})
+    const collect = async (): Promise<string> => {
+      let out = ''
+      let lastTyping = Date.now()
+      for await (const delta of streamAnswer(
+        config.openrouterApiKey,
+        config.model,
+        messages,
+        config.maxTokens,
+        config.reasoningMaxTokens,
+      )) {
+        out += delta
+        if (Date.now() - lastTyping > 4000) {
+          lastTyping = Date.now()
+          await ctx.replyWithChatAction('typing').catch(() => {})
+        }
       }
+      return out
+    }
+
+    let full = await collect()
+    if (!full.trim()) {
+      console.log(`[warn] chat=${msg.chat.id} user=${msg.from?.id} пустой ответ, повтор запроса`)
+      full = await collect()
     }
 
     console.log(`AI ----> Bot chat=${msg.chat.id} user=${msg.from?.id}`, full || '(empty)')
@@ -236,7 +252,13 @@ async function forceCompress(notifyChatId: number, chatId: number): Promise<void
   await runCompressor({
     store,
     complete: (messages) =>
-      completeChat(config.openrouterApiKey, config.model, messages, config.maxTokens),
+      completeChat(
+        config.openrouterApiKey,
+        config.model,
+        messages,
+        config.maxTokens,
+        config.reasoningMaxTokens,
+      ),
     participants,
     contextMaxChars: config.contextMaxChars,
     messageMaxChars: config.contextMessageMaxChars,

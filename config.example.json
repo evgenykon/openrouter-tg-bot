@@ -9,5 +9,6 @@
   "maxTokens": 8192,
   "contextMessageMaxChars": 1000,
   "contextMaxChars": 6000,
-  "compressEnabled": true
+  "compressEnabled": true,
+  "reasoningMaxTokens": 4096
 }

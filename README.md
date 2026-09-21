@@ -46,7 +46,8 @@ Telegram-бот, который добавляется в группу и отв
      `systemPrompt`, `privateSystemPrompt`, `maxContextMessages`,
      `fallbackContextTokens`, `safetyMarginPercent`, `maxTokens`,
      `contextMessageMaxChars`, `contextMaxChars` (порог консолидации блока
-     контекста), `compressEnabled`
+     контекста), `compressEnabled`, `reasoningMaxTokens` (лимит reasoning для
+     reasoning-моделей; иначе reasoning выедает `maxTokens` и ответ пустой)
 4. Запуск:
    ```sh
    docker compose up -d --build

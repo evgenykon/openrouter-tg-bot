@@ -62,19 +62,26 @@ async function throwHttpError(res: Response): Promise<never> {
   throw new OpenRouterError(`Ошибка OpenRouter: ${detail}`)
 }
 
-function chatRequestBody(
+export function chatRequestBody(
   model: string,
   messages: ChatMessage[],
   maxTokens: number,
   stream: boolean,
+  reasoningMaxTokens?: number,
 ): string {
-  return JSON.stringify({
+  const body: Record<string, unknown> = {
     model,
     messages,
     max_tokens: maxTokens,
     temperature: 0.7,
     stream,
-  })
+  }
+  // Ограничиваем reasoning, иначе у reasoning-моделей (deepseek-r1) он
+  // выедает весь max_tokens и content приходит пустым (finish_reason=length).
+  if (reasoningMaxTokens && reasoningMaxTokens > 0) {
+    body['reasoning'] = { max_tokens: reasoningMaxTokens }
+  }
+  return JSON.stringify(body)
 }
 
 export async function completeChat(
@@ -82,6 +89,7 @@ export async function completeChat(
   model: string,
   messages: ChatMessage[],
   maxTokens: number,
+  reasoningMaxTokens?: number,
 ): Promise<string> {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -89,7 +97,7 @@ export async function completeChat(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: chatRequestBody(model, messages, maxTokens, false),
+    body: chatRequestBody(model, messages, maxTokens, false, reasoningMaxTokens),
     signal: AbortSignal.timeout(180_000),
   })
   if (!res.ok) await throwHttpError(res)
@@ -106,6 +114,7 @@ export async function* streamAnswer(
   model: string,
   messages: ChatMessage[],
   maxTokens: number,
+  reasoningMaxTokens?: number,
 ): AsyncGenerator<string> {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -113,7 +122,7 @@ export async function* streamAnswer(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: chatRequestBody(model, messages, maxTokens, true),
+    body: chatRequestBody(model, messages, maxTokens, true, reasoningMaxTokens),
     signal: AbortSignal.timeout(180_000),
   })
   if (!res.ok) await throwHttpError(res)
@@ -133,10 +142,21 @@ export async function* streamAnswer(
       if (!payload) continue
       try {
         const j = JSON.parse(payload) as {
-          choices?: Array<{ delta?: { content?: string } }>
+          choices?: Array<{
+            delta?: { content?: string; reasoning?: string }
+            finish_reason?: string
+          }>
+          usage?: { completion_tokens_details?: { reasoning_tokens?: number } }
         }
-        const delta = j.choices?.[0]?.delta?.content
+        const choice = j.choices?.[0]
+        const delta = choice?.delta?.content
         if (delta) yield delta
+        if (choice?.finish_reason === 'length') {
+          const reasoning = j.usage?.completion_tokens_details?.reasoning_tokens
+          console.log(
+            `[openrouter] finish_reason=length (reasoning_tokens=${reasoning ?? '?'}) — ответ мог обрезаться`,
+          )
+        }
       } catch {
         // невалидная строка SSE — пропускаем
       }

@@ -16,6 +16,7 @@ export interface Config {
   contextMessageMaxChars: number
   contextMaxChars: number
   compressEnabled: boolean
+  reasoningMaxTokens: number
 }
 
 function loadDotEnv(path: string): void {
@@ -85,5 +86,6 @@ export function loadConfig(): Config {
     contextMessageMaxChars: num(json, 'contextMessageMaxChars', 1000),
     contextMaxChars: num(json, 'contextMaxChars', 6000),
     compressEnabled: bool(json, 'compressEnabled', true),
+    reasoningMaxTokens: num(json, 'reasoningMaxTokens', 4096),
   }
 }
