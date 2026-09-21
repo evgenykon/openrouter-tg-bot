@@ -72,7 +72,10 @@ export async function runCompressor(deps: CompressorDeps): Promise<void> {
   const raw = await store.rawDays()
   const missing = raw.filter((day) => day < today && !done.has(day)).sort()
 
-  if (missing.length === 0) return
+  if (missing.length === 0) {
+    log(`нет завершённых несжатых дней (today=${today})`)
+    return
+  }
 
   if (!(await store.tryLock(LOCK_TTL_SECONDS))) {
     log('compression skipped: lock is held')
