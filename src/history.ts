@@ -1,4 +1,5 @@
 import type { Config } from './config.ts'
+import { dayKeyFromDate } from './day.ts'
 import {
   chatParticipants,
   chatSpace,
@@ -88,12 +89,33 @@ async function buildProfiles(
   return { messages, tokens }
 }
 
-/** Сырые сообщения только непожатых дней (в норме — текущий день), хронологически. */
+/**
+ * В LLM уходят только сырые сообщения текущего дня: все прошлые дни обязаны быть
+ * уже сжаты (компрессор вызывается до сборки контекста). Несжатые прошлые дни в
+ * запрос не попадают. Если компрессия выключена — отдаём все сырые дни, иначе
+ * контекст остался бы без истории.
+ */
+export function daysToLoad(
+  raw: string[],
+  compressed: string[],
+  today: string,
+  compressEnabled: boolean,
+): string[] {
+  if (compressEnabled) return [today]
+  const done = new Set(compressed)
+  return [...raw].filter((day) => !done.has(day)).sort()
+}
+
 async function collectHistoryLines(s: Space, config: Config): Promise<string[]> {
-  const done = new Set(await compressedDays(s))
-  const pending = (await rawDays(s)).filter((day) => !done.has(day)).sort()
+  const today = dayKeyFromDate(new Date())
+  const days = daysToLoad(
+    await rawDays(s),
+    await compressedDays(s),
+    today,
+    config.compressEnabled,
+  )
   const lines: string[] = []
-  for (const day of pending) {
+  for (const day of days) {
     const msgs = await messagesForDay(s, day)
     for (const m of msgs) {
       lines.push(`${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`)
