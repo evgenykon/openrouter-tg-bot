@@ -109,7 +109,7 @@ export async function runCompressor(deps: CompressorDeps): Promise<void> {
 
         const prevContext = (await store.getContext()).trim()
         let context = stripMarkup(
-          await deps.complete(buildMergeMessages(deps.participants, prevContext, summary)),
+          await deps.complete(buildMergeMessages(deps.participants, day, prevContext, summary)),
         )
         if (!context) context = prevContext || summary
 
