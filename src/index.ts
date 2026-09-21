@@ -2,7 +2,8 @@ import { Bot, GrammyError, type Context } from 'grammy'
 import type { Message } from '@grammyjs/types'
 import type { Config } from './config.ts'
 import { loadConfig } from './config.ts'
-import { runCompressor } from './compress.ts'
+import { runCompressor, type CompressorStore } from './compress.ts'
+import { dayKeyFromDate } from './day.ts'
 import {
   chatParticipants,
   chatStore,
@@ -241,12 +242,20 @@ function replyToPrompt(msg: Message): PromptRequest['replyTo'] {
   return { name: displayNameOf(r.from), text: r.text }
 }
 
+/** Завершённые (до сегодня) дни, которых ещё нет в индексе сжатых. */
+async function pendingDays(store: CompressorStore): Promise<string[]> {
+  const done = new Set(await store.compressedDays())
+  const today = dayKeyFromDate(new Date())
+  return (await store.rawDays()).filter((day) => day < today && !done.has(day)).sort()
+}
+
 async function chatStatus(chatId: number): Promise<string> {
   const store = chatStore(chatId)
   const days = await store.compressedDays()
   const last = days.at(-1) ?? 'нет'
   const size = (await store.getContext()).length
-  return `последний сжатый день: ${last}, блок контекста: ${size} симв.`
+  const pending = (await pendingDays(store)).length
+  return `последний сжатый день: ${last}, блок контекста: ${size} симв., к сжатию: ${pending}`
 }
 
 async function forceCompress(notifyChatId: number, chatId: number): Promise<void> {
@@ -337,6 +346,17 @@ bot.on('message', async (ctx) => {
         const targetId = chats.find((cid) => cid === requested || cid === -requested)
         if (targetId === undefined) {
           await ctx.reply(`Ты не найден в чате ${requested}.`, { reply_to_message_id: msg.message_id })
+          break
+        }
+        const store = chatStore(targetId)
+        await store.reindexDays()
+        const pending = await pendingDays(store)
+        if (pending.length === 0) {
+          const today = dayKeyFromDate(new Date())
+          await ctx.reply(
+            `Нет завершённых дней для сжатия: прошлые дни уже сжаты, а текущий день (${today}) не сжимается — он уйдёт в сжатие после смены суток (UTC).\n${await chatStatus(targetId)}`,
+            { reply_to_message_id: msg.message_id },
+          )
           break
         }
         await ctx.replyWithChatAction('typing')
