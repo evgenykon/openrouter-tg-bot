@@ -226,6 +226,30 @@ export async function pruneDay(s: Space, day: string): Promise<void> {
   await pipe.exec()
 }
 
+/**
+ * Атомарная фиксация сжатого дня: сводка, блок контекста, индекс сжатых,
+ * удаление дня из сырых и прунинг сообщений — всё в одном MULTI/EXEC.
+ */
+export async function commitCompression(
+  s: Space,
+  day: string,
+  summary: string,
+  context: string,
+): Promise<void> {
+  const ids = await client.zRange(dayMsgsKey(s, day), 0, -1)
+  const pipe = client
+    .multi()
+    .set(daySummaryKey(s, day), summary)
+    .set(contextKey(s), context)
+    .zAdd(daysKey(s), { score: dayStartUnix(day), value: day })
+    .zRem(rawDaysKey(s), day)
+    .del(dayMsgsKey(s, day))
+  for (const id of ids) {
+    pipe.del(msgKey(s, Number(id))).zRem(messagesKey(s), id)
+  }
+  await pipe.exec()
+}
+
 export async function tryLockCompress(s: Space, ttlSeconds: number): Promise<boolean> {
   const res = await client.set(lockKey(s), String(Date.now()), { NX: true, EX: ttlSeconds })
   return res === 'OK'
@@ -360,11 +384,9 @@ function storeFor(s: Space): CompressorStore {
     rawDays: () => rawDays(s),
     compressedDays: () => compressedDays(s),
     messagesForDay: (day) => messagesForDay(s, day),
-    setDaySummary: (day, text) => setDaySummary(s, day, text),
+    commitCompression: (day, summary, context) => commitCompression(s, day, summary, context),
     markDayCompressed: (day) => markDayCompressed(s, day),
     getContext: () => getContext(s),
-    setContext: (text) => setContext(s, text),
-    pruneDay: (day) => pruneDay(s, day),
     tryLock: (ttl) => tryLockCompress(s, ttl),
     touchLock: (ttl) => refreshLockCompress(s, ttl),
     unlock: () => unlockCompress(s),

@@ -20,11 +20,13 @@ export interface CompressorStore {
   rawDays(): Promise<string[]>
   compressedDays(): Promise<string[]>
   messagesForDay(day: string): Promise<StoredMessage[]>
-  setDaySummary(day: string, text: string): Promise<void>
+  /**
+   * Атомарно фиксирует сжатие дня: сводка дня, блок контекста, отметка в
+   * индексе сжатых, удаление дня из сырых и прунинг сообщений — один MULTI.
+   */
+  commitCompression(day: string, summary: string, context: string): Promise<void>
   markDayCompressed(day: string): Promise<void>
   getContext(): Promise<string>
-  setContext(text: string): Promise<void>
-  pruneDay(day: string): Promise<void>
   tryLock(ttlSeconds: number): Promise<boolean>
   touchLock(ttlSeconds: number): Promise<void>
   unlock(): Promise<void>
@@ -121,10 +123,7 @@ export async function runCompressor(deps: CompressorDeps): Promise<void> {
           }
         }
 
-        await store.setDaySummary(day, summary)
-        await store.setContext(context)
-        await store.markDayCompressed(day)
-        await store.pruneDay(day)
+        await store.commitCompression(day, summary, context)
         await store.touchLock(LOCK_TTL_SECONDS)
 
         log(`compressed day ${day}: ${dayBefore} -> ${summary.length} chars`)

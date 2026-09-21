@@ -14,6 +14,7 @@ class FakeStore implements CompressorStore {
   summaries = new Map<string, string>()
   context = ''
   pruned: string[] = []
+  commits: string[] = []
   lockFree = true
   reindexed = false
   folded = false
@@ -33,20 +34,18 @@ class FakeStore implements CompressorStore {
   async messagesForDay(day: string): Promise<StoredMessage[]> {
     return this.raw.get(day) ?? []
   }
-  async setDaySummary(day: string, text: string): Promise<void> {
-    this.summaries.set(day, text)
+  async commitCompression(day: string, summary: string, context: string): Promise<void> {
+    this.summaries.set(day, summary)
+    this.context = context
+    this.compressed.add(day)
+    this.pruned.push(day)
+    this.commits.push(day)
   }
   async markDayCompressed(day: string): Promise<void> {
     this.compressed.add(day)
   }
   async getContext(): Promise<string> {
     return this.context
-  }
-  async setContext(text: string): Promise<void> {
-    this.context = text
-  }
-  async pruneDay(day: string): Promise<void> {
-    this.pruned.push(day)
   }
   async tryLock(): Promise<boolean> {
     return this.lockFree
@@ -89,6 +88,8 @@ test('нет пропущенных дней — ничего не делает 
   const { deps: d, notices } = deps(store, defaultComplete)
   await runCompressor(d)
   assert.equal(notices.length, 0)
+  assert.equal(store.commits.length, 0)
+  assert.equal(store.context, '')
   assert.equal(store.reindexed, true)
   assert.equal(store.folded, true)
 })
@@ -113,6 +114,7 @@ test('сжимает дни от старых к новым, уведомляе�
   assert.equal(store.summaries.get('2026-09-20'), 'Тема дня')
   assert.deepEqual([...store.compressed].sort(), ['2026-09-19', '2026-09-20'])
   assert.deepEqual(store.pruned, ['2026-09-19', '2026-09-20'])
+  assert.deepEqual(store.commits, ['2026-09-19', '2026-09-20'])
   assert.equal(store.context, 'Тема: отношения\nПозиция Аня: устала')
 
   // предупреждение + по уведомлению на день
