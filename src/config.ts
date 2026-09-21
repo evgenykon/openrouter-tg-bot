@@ -66,11 +66,13 @@ export function loadConfig(): Config {
     throw new Error('config.json: allowedUserIds не может быть пустым')
   }
 
+  const model = typeof json.model === 'string' ? json.model : 'openai/gpt-4o-mini'
+
   return {
     botToken: reqString(env, 'BOT_TOKEN'),
     openrouterApiKey: reqString(env, 'OPENROUTER_API_KEY'),
     redisUrl: env.REDIS_URL ?? 'redis://localhost:6379',
-    model: typeof json.model === 'string' ? json.model : 'openai/gpt-4o-mini',
+    model,
     allowedUserIds: allowed,
     systemPrompt:
       typeof json.systemPrompt === 'string'
@@ -91,6 +93,6 @@ export function loadConfig(): Config {
     compressModel:
       typeof json.compressModel === 'string' && json.compressModel.trim()
         ? json.compressModel
-        : 'deepseek/deepseek-chat',
+        : model,
   }
 }

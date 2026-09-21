@@ -48,9 +48,10 @@ Telegram-бот, который добавляется в группу и отв
      `contextMessageMaxChars`, `contextMaxChars` (порог консолидации блока
      контекста), `compressEnabled`, `reasoningMaxTokens` (лимит reasoning для
      reasoning-моделей; иначе reasoning выедает `maxTokens` и ответ пустой),
-     `compressModel` (модель для сжатия; reasoning-модели вроде `deepseek-r1`
-     нестабильно отдают пустой `content`, поэтому для сжатия лучше
-     не-reasoning модель, по умолчанию `deepseek/deepseek-chat`)
+     `compressModel` (необязательное переопределение модели для сжатия;
+     по умолчанию используется та же модель, что и `model`. Reasoning-модели
+     вроде `deepseek-r1` нестабильно отдают пустой `content` — для сжатия
+     надёжнее не-reasoning модель, например `deepseek/deepseek-chat`)
 4. Запуск:
    ```sh
    docker compose up -d --build

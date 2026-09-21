@@ -1,5 +1,5 @@
 {
-  "model": "openai/gpt-4o-mini",
+  "model": "deepseek/deepseek-chat",
   "allowedUserIds": [123456789],
   "privateSystemPrompt": "",
   "systemPrompt": "",
@@ -10,6 +10,5 @@
   "contextMessageMaxChars": 1000,
   "contextMaxChars": 6000,
   "compressEnabled": true,
-  "reasoningMaxTokens": 4096,
-  "compressModel": "deepseek/deepseek-chat"
+  "reasoningMaxTokens": 4096
 }
