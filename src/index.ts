@@ -511,6 +511,8 @@ bot.on('message', async (ctx) => {
   } else {
     await saveChatMessage(ctx.chat.id, toStored(msg, false))
     if (!allowed) return
+    // обычные сообщения тоже запускают автосжатие завершённых дней
+    await compressIfNeeded(ctx, msg)
   }
 })
 
