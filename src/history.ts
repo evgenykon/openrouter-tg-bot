@@ -106,7 +106,12 @@ export function daysToLoad(
   return [...raw].filter((day) => !done.has(day)).sort()
 }
 
-async function collectHistoryLines(s: Space, config: Config): Promise<string[]> {
+/**
+ * История для LLM: сообщения пользователей — `Имя: текст` (role user),
+ * ответы бота — role assistant без префикса имени. Иначе модель копирует
+ * формат «Имя: текст» и начинает ответ со своего же имени.
+ */
+async function collectHistoryMessages(s: Space, config: Config): Promise<ChatMessage[]> {
   const today = dayKeyFromDate(new Date())
   const days = daysToLoad(
     await rawDays(s),
@@ -114,20 +119,25 @@ async function collectHistoryLines(s: Space, config: Config): Promise<string[]> 
     today,
     config.compressEnabled,
   )
-  const lines: string[] = []
+  const out: ChatMessage[] = []
   for (const day of days) {
     const msgs = await messagesForDay(s, day)
     for (const m of msgs) {
-      lines.push(`${m.name}: ${clip(m.text, config.contextMessageMaxChars)}`)
+      const text = clip(m.text, config.contextMessageMaxChars)
+      out.push(
+        m.isBot
+          ? { role: 'assistant', content: text }
+          : { role: 'user', content: `${m.name}: ${text}` },
+      )
     }
   }
-  return lines
+  return out
 }
 
 function assembleContext(
   profiles: ProfileBlock,
   contextText: string,
-  historyLines: string[],
+  history: ChatMessage[],
   budget: number,
   config: Config,
 ): ChatMessage[] {
@@ -138,18 +148,18 @@ function assembleContext(
   const historyBudget = Math.max(0, budget - profiles.tokens - contextTokens)
 
   const acc: Accumulator = { tokens: 0, count: 0 }
-  const history: ChatMessage[] = []
-  for (let i = historyLines.length - 1; i >= 0; i--) {
-    const line = historyLines[i]
-    if (line === undefined) continue
-    if (fits(acc, line, historyBudget, config.maxContextMessages, config.contextMessageMaxChars)) {
-      history.push({ role: 'user', content: line })
+  const kept: ChatMessage[] = []
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i]
+    if (m === undefined) continue
+    if (fits(acc, m.content, historyBudget, config.maxContextMessages, config.contextMessageMaxChars)) {
+      kept.push(m)
     }
   }
 
   const out: ChatMessage[] = [...profiles.messages]
   if (contextLine) out.push({ role: 'user', content: contextLine })
-  return [...out, ...history.reverse()]
+  return [...out, ...kept.reverse()]
 }
 
 export async function buildGroupContext(
@@ -166,9 +176,9 @@ export async function buildGroupContext(
 
   const profiles = await buildProfiles(participants, currentUserId, config.contextMessageMaxChars)
   const contextText = (await getContext(s)).trim()
-  const historyLines = await collectHistoryLines(s, config)
+  const history = await collectHistoryMessages(s, config)
 
-  return assembleContext(profiles, contextText, historyLines, budget, config)
+  return assembleContext(profiles, contextText, history, budget, config)
 }
 
 export async function buildDmContext(
@@ -188,9 +198,9 @@ export async function buildDmContext(
   }
 
   const contextText = (await getContext(s)).trim()
-  const historyLines = await collectHistoryLines(s, config)
+  const history = await collectHistoryMessages(s, config)
 
-  return assembleContext(profiles, contextText, historyLines, budget, config)
+  return assembleContext(profiles, contextText, history, budget, config)
 }
 
 export function splitMessage(text: string, limit = 4096): string[] {

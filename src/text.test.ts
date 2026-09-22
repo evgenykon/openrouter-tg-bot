@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeDaySummary, stripMarkup } from './text.ts'
+import { normalizeDaySummary, stripMarkup, stripSpeakerPrefix } from './text.ts'
 
 test('stripMarkup убирает markdown-заголовки и списки', () => {
   const out = stripMarkup('# Тема\n- первый пункт\n* второй пункт\n1. третий пункт')
@@ -39,4 +39,29 @@ test('normalizeDaySummary оставляет по строке на тему', (
 
 test('normalizeDaySummary на пустом входе даёт пустую строку', () => {
   assert.equal(normalizeDaySummary('   \n\n'), '')
+})
+
+test('stripSpeakerPrefix убирает одинарный префикс', () => {
+  assert.equal(
+    stripSpeakerPrefix('PsychologyChatBot: привет', ['PsychologyChatBot']),
+    'привет',
+  )
+})
+
+test('stripSpeakerPrefix убирает повторный префикс', () => {
+  assert.equal(
+    stripSpeakerPrefix('PsychologyChatBot: PsychologyChatBot: привет', ['PsychologyChatBot']),
+    'привет',
+  )
+})
+
+test('stripSpeakerPrefix не трогает текст без префикса', () => {
+  assert.equal(stripSpeakerPrefix('просто ответ', ['PsychologyChatBot']), 'просто ответ')
+})
+
+test('stripSpeakerPrefix учитывает несколько имён (имя и username)', () => {
+  assert.equal(
+    stripSpeakerPrefix('deepseekpsybot: ответ', ['PsychologyChatBot', 'deepseekpsybot']),
+    'ответ',
+  )
 })

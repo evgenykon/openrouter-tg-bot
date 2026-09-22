@@ -58,3 +58,28 @@ export function normalizeDaySummary(text: string): string {
     .filter((line) => line.length > 0)
     .join('\n')
 }
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Убирает ведущий префикс «Имя:» (в т.ч. повторный) из ответа модели —
+ * она иногда копирует формат контекста и начинает со своего имени.
+ */
+export function stripSpeakerPrefix(text: string, names: string[]): string {
+  let out = text.replace(/^\s+/, '')
+  for (;;) {
+    let changed = false
+    for (const name of names) {
+      if (!name) continue
+      const re = new RegExp(`^${escapeRegExp(name)}\\s*:\\s*`, 'i')
+      if (re.test(out)) {
+        out = out.replace(re, '')
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+  return out
+}

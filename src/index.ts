@@ -27,6 +27,7 @@ import {
   splitMessage,
   type PromptRequest,
 } from './history.ts'
+import { stripSpeakerPrefix } from './text.ts'
 import { ERR_MODEL, formatModelError } from './notices.ts'
 import {
   displayName,
@@ -218,6 +219,8 @@ async function answer(
         `[warn] chat=${msg.chat.id} user=${msg.from?.id} пустой ответ, попытка ${attempt}/${MAX_ATTEMPTS}`,
       )
     }
+
+    full = stripSpeakerPrefix(full, [bot.botInfo.first_name, bot.botInfo.username])
 
     console.log(`AI ----> Bot chat=${msg.chat.id} user=${msg.from?.id}`, full || '(empty)')
     if (!full.trim()) {
