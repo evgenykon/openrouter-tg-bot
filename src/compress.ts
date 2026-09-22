@@ -1,7 +1,6 @@
 import { dayKeyFromDate } from './day.ts'
 import type { StoredMessage } from './db.ts'
 import {
-  COMPRESS_START_NOTICE,
   formatConsolidatedNotice,
   formatDayCompressError,
   formatDayCompressedNotice,
@@ -89,8 +88,6 @@ export async function runCompressor(deps: CompressorDeps): Promise<void> {
   }
 
   try {
-    await deps.notify(COMPRESS_START_NOTICE)
-
     for (const day of missing) {
       try {
         const feed = await store.messagesForDay(day)

@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  COMPRESS_START_NOTICE,
   ERR_MODEL,
   formatConsolidatedNotice,
   formatDayCompressError,
@@ -37,7 +36,5 @@ test('formatModelError отдаёт сообщение ошибки, иначе 
 })
 
 test('служебные тексты не содержат markdown', () => {
-  for (const text of [COMPRESS_START_NOTICE, ERR_MODEL]) {
-    assert.doesNotMatch(text, /[*_`#>|]/)
-  }
+  assert.doesNotMatch(ERR_MODEL, /[*_`#>|]/)
 })

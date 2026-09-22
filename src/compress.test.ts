@@ -117,11 +117,10 @@ test('сжимает дни от старых к новым, уведомляе�
   assert.deepEqual(store.commits, ['2026-09-19', '2026-09-20'])
   assert.equal(store.context, 'Тема: отношения\nПозиция Аня: устала')
 
-  // предупреждение + по уведомлению на день
-  assert.equal(notices.length, 3)
-  assert.match(notices[0] ?? '', /Начал процедуру сжатия/)
-  assert.match(notices[1] ?? '', /за дату 2026-09-19/)
-  assert.match(notices[2] ?? '', /за дату 2026-09-20/)
+  // по уведомлению на каждый день
+  assert.equal(notices.length, 2)
+  assert.match(notices[0] ?? '', /за дату 2026-09-19/)
+  assert.match(notices[1] ?? '', /за дату 2026-09-20/)
 })
 
 test('ошибка модели на дне — уведомление об ошибке, день не помечен, цикл остановлен', async () => {
@@ -138,10 +137,9 @@ test('ошибка модели на дне — уведомление об ош
 
   assert.equal(store.compressed.size, 0)
   assert.equal(store.pruned.length, 0)
-  assert.equal(notices.length, 2)
-  assert.match(notices[0] ?? '', /Начал процедуру сжатия/)
-  assert.match(notices[1] ?? '', /HTTP 429/)
-  assert.match(notices[1] ?? '', /2026-09-19/)
+  assert.equal(notices.length, 1)
+  assert.match(notices[0] ?? '', /HTTP 429/)
+  assert.match(notices[0] ?? '', /2026-09-19/)
 })
 
 test('пустая сводка дня — ошибка, день не помечен', async () => {
@@ -151,7 +149,7 @@ test('пустая сводка дня — ошибка, день не поме�
   const { deps: d, notices } = deps(store, complete)
   await runCompressor(d)
   assert.equal(store.compressed.size, 0)
-  assert.match(notices[1] ?? '', /пустой ответ модели/)
+  assert.match(notices[0] ?? '', /пустой ответ модели/)
 })
 
 test('консолидация блока при превышении лимита + отдельное уведомление', async () => {
@@ -205,6 +203,6 @@ test('пустой день помечается сжатым без уведо�
   const { deps: d, notices } = deps(store, defaultComplete)
   await runCompressor(d)
   assert.equal(store.compressed.has('2026-09-20'), true)
-  // только предупреждение о старте
-  assert.equal(notices.length, 1)
+  // пустой день — без уведомлений
+  assert.equal(notices.length, 0)
 })

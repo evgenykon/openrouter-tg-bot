@@ -105,6 +105,19 @@ async function sendPlain(chatId: number, text: string): Promise<void> {
   }
 }
 
+/**
+ * Показывает статус «печатает…» и обновляет его, пока идёт длительная
+ * операция (сжатие). Возвращает функцию остановки.
+ */
+function startTyping(chatId: number): () => void {
+  const send = (): void => {
+    void bot.api.sendChatAction(chatId, 'typing').catch(() => {})
+  }
+  send()
+  const timer = setInterval(send, 4000)
+  return () => clearInterval(timer)
+}
+
 async function compressIfNeeded(ctx: Context, msg: Message): Promise<void> {
   if (!config.compressEnabled || !msg.from) return
   const isPrivate = msg.chat.type === 'private'
@@ -123,23 +136,28 @@ async function compressIfNeeded(ctx: Context, msg: Message): Promise<void> {
       participants = [...map.values()]
     }
 
-    await runCompressor({
-      store,
-      complete: (messages) =>
-        completeChat(
-          config.openrouterApiKey,
-          config.compressModel,
-          messages,
-          config.maxTokens,
-          config.reasoningMaxTokens,
-        ),
-      participants,
-      contextMaxChars: config.contextMaxChars,
-      messageMaxChars: config.contextMessageMaxChars,
-      notify: (text) => sendPlain(targetChatId, text),
-      log: (message) => console.log(`[compress] chat=${targetChatId} ${message}`),
-      delayMs: 2000,
-    })
+    const stopTyping = startTyping(targetChatId)
+    try {
+      await runCompressor({
+        store,
+        complete: (messages) =>
+          completeChat(
+            config.openrouterApiKey,
+            config.compressModel,
+            messages,
+            config.maxTokens,
+            config.reasoningMaxTokens,
+          ),
+        participants,
+        contextMaxChars: config.contextMaxChars,
+        messageMaxChars: config.contextMessageMaxChars,
+        notify: (text) => sendPlain(targetChatId, text),
+        log: (message) => console.log(`[compress] chat=${targetChatId} ${message}`),
+        delayMs: 2000,
+      })
+    } finally {
+      stopTyping()
+    }
   } catch (err) {
     console.error(`[compress] chat=${targetChatId} fatal`, err)
     await sendPlain(targetChatId, ERR_MODEL)
@@ -263,23 +281,28 @@ async function forceCompress(notifyChatId: number, chatId: number): Promise<void
   const store = chatStore(chatId)
   await store.reindexDays()
   const participants = [...(await chatParticipants(chatId)).values()]
-  await runCompressor({
-    store,
-    complete: (messages) =>
-      completeChat(
-        config.openrouterApiKey,
-        config.compressModel,
-        messages,
-        config.maxTokens,
-        config.reasoningMaxTokens,
-      ),
-    participants,
-    contextMaxChars: config.contextMaxChars,
-    messageMaxChars: config.contextMessageMaxChars,
-    notify: (text) => sendPlain(notifyChatId, text),
-    log: (message) => console.log(`[compress] chat=${chatId} ${message}`),
-    delayMs: 2000,
-  })
+  const stopTyping = startTyping(notifyChatId)
+  try {
+    await runCompressor({
+      store,
+      complete: (messages) =>
+        completeChat(
+          config.openrouterApiKey,
+          config.compressModel,
+          messages,
+          config.maxTokens,
+          config.reasoningMaxTokens,
+        ),
+      participants,
+      contextMaxChars: config.contextMaxChars,
+      messageMaxChars: config.contextMessageMaxChars,
+      notify: (text) => sendPlain(notifyChatId, text),
+      log: (message) => console.log(`[compress] chat=${chatId} ${message}`),
+      delayMs: 2000,
+    })
+  } finally {
+    stopTyping()
+  }
 }
 
 bot.on('message', async (ctx) => {
