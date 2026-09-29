@@ -13,6 +13,17 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - CONFIG_PATH=/app/config.json
+      # Опциональные переопределения config.json (пустое значение = брать из конфига)
+      - MODEL=${MODEL:-}
+      - COMPRESS_MODEL=${COMPRESS_MODEL:-}
+      - MAX_TOKENS=${MAX_TOKENS:-}
+      - REASONING_MAX_TOKENS=${REASONING_MAX_TOKENS:-}
+      - MAX_CONTEXT_MESSAGES=${MAX_CONTEXT_MESSAGES:-}
+      - FALLBACK_CONTEXT_TOKENS=${FALLBACK_CONTEXT_TOKENS:-}
+      - SAFETY_MARGIN_PERCENT=${SAFETY_MARGIN_PERCENT:-}
+      - CONTEXT_MESSAGE_MAX_CHARS=${CONTEXT_MESSAGE_MAX_CHARS:-}
+      - CONTEXT_MAX_CHARS=${CONTEXT_MAX_CHARS:-}
+      - COMPRESS_ENABLED=${COMPRESS_ENABLED:-}
     volumes:
       - ./config.json:/app/config.json:ro
     depends_on:

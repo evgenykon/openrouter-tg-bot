@@ -53,6 +53,27 @@ function bool(json: Record<string, unknown>, name: string, fallback: boolean): b
   return typeof v === 'boolean' ? v : fallback
 }
 
+/** Env-переопределения: пустая строка значит «не задано» — берём значение из config.json. */
+function envString(env: Record<string, string | undefined>, name: string): string | undefined {
+  const v = env[name]?.trim()
+  return v ? v : undefined
+}
+
+function envNumber(env: Record<string, string | undefined>, name: string): number | undefined {
+  const v = envString(env, name)
+  if (v === undefined) return undefined
+  const n = Number(v)
+  return Number.isFinite(n) ? n : undefined
+}
+
+function envBool(env: Record<string, string | undefined>, name: string): boolean | undefined {
+  const v = envString(env, name)?.toLowerCase()
+  if (v === undefined) return undefined
+  if (['1', 'true', 'yes', 'on'].includes(v)) return true
+  if (['0', 'false', 'no', 'off'].includes(v)) return false
+  return undefined
+}
+
 export function loadConfig(): Config {
   loadDotEnv('.env')
 
@@ -66,7 +87,9 @@ export function loadConfig(): Config {
     throw new Error('config.json: allowedUserIds не может быть пустым')
   }
 
-  const model = typeof json.model === 'string' ? json.model : 'openai/gpt-4o-mini'
+  const model =
+    envString(env, 'MODEL') ??
+    (typeof json.model === 'string' ? json.model : 'openai/gpt-4o-mini')
 
   return {
     botToken: reqString(env, 'BOT_TOKEN'),
@@ -82,17 +105,24 @@ export function loadConfig(): Config {
       typeof json.privateSystemPrompt === 'string'
         ? json.privateSystemPrompt
         : 'Ты — доброжелательный психологический помощник. Отвечай на языке пользователя.',
-    maxContextMessages: num(json, 'maxContextMessages', 200),
-    fallbackContextTokens: num(json, 'fallbackContextTokens', 32768),
-    safetyMarginPercent: num(json, 'safetyMarginPercent', 30),
-    maxTokens: num(json, 'maxTokens', 1024),
-    contextMessageMaxChars: num(json, 'contextMessageMaxChars', 1000),
-    contextMaxChars: num(json, 'contextMaxChars', 6000),
-    compressEnabled: bool(json, 'compressEnabled', true),
-    reasoningMaxTokens: num(json, 'reasoningMaxTokens', 4096),
+    maxContextMessages:
+      envNumber(env, 'MAX_CONTEXT_MESSAGES') ?? num(json, 'maxContextMessages', 200),
+    fallbackContextTokens:
+      envNumber(env, 'FALLBACK_CONTEXT_TOKENS') ?? num(json, 'fallbackContextTokens', 32768),
+    safetyMarginPercent:
+      envNumber(env, 'SAFETY_MARGIN_PERCENT') ?? num(json, 'safetyMarginPercent', 30),
+    maxTokens: envNumber(env, 'MAX_TOKENS') ?? num(json, 'maxTokens', 1024),
+    contextMessageMaxChars:
+      envNumber(env, 'CONTEXT_MESSAGE_MAX_CHARS') ?? num(json, 'contextMessageMaxChars', 1000),
+    contextMaxChars:
+      envNumber(env, 'CONTEXT_MAX_CHARS') ?? num(json, 'contextMaxChars', 6000),
+    compressEnabled: envBool(env, 'COMPRESS_ENABLED') ?? bool(json, 'compressEnabled', true),
+    reasoningMaxTokens:
+      envNumber(env, 'REASONING_MAX_TOKENS') ?? num(json, 'reasoningMaxTokens', 4096),
     compressModel:
-      typeof json.compressModel === 'string' && json.compressModel.trim()
+      envString(env, 'COMPRESS_MODEL') ??
+      (typeof json.compressModel === 'string' && json.compressModel.trim()
         ? json.compressModel
-        : model,
+        : model),
   }
 }

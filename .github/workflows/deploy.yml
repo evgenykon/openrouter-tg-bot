@@ -37,9 +37,29 @@ jobs:
           # config.json, .env, data/ исключены из синка и защищены от --delete
 
       - name: Rebuild and restart
+        env:
+          # Опциональные настройки модели: пустая переменная = значение из config.json
+          MODEL: ${{ vars.MODEL }}
+          COMPRESS_MODEL: ${{ vars.COMPRESS_MODEL }}
+          MAX_TOKENS: ${{ vars.MAX_TOKENS }}
+          REASONING_MAX_TOKENS: ${{ vars.REASONING_MAX_TOKENS }}
+          MAX_CONTEXT_MESSAGES: ${{ vars.MAX_CONTEXT_MESSAGES }}
+          FALLBACK_CONTEXT_TOKENS: ${{ vars.FALLBACK_CONTEXT_TOKENS }}
+          SAFETY_MARGIN_PERCENT: ${{ vars.SAFETY_MARGIN_PERCENT }}
+          CONTEXT_MESSAGE_MAX_CHARS: ${{ vars.CONTEXT_MESSAGE_MAX_CHARS }}
+          CONTEXT_MAX_CHARS: ${{ vars.CONTEXT_MAX_CHARS }}
+          COMPRESS_ENABLED: ${{ vars.COMPRESS_ENABLED }}
         run: |
           PORT="${{ vars.DEPLOY_PORT || '22' }}"
           TARGET="${{ vars.DEPLOY_TARGET || '/app/openrouter-tg-bot' }}"
+          OVERRIDES=""
+          for name in MODEL COMPRESS_MODEL MAX_TOKENS REASONING_MAX_TOKENS \
+            MAX_CONTEXT_MESSAGES FALLBACK_CONTEXT_TOKENS SAFETY_MARGIN_PERCENT \
+            CONTEXT_MESSAGE_MAX_CHARS CONTEXT_MAX_CHARS COMPRESS_ENABLED; do
+            if [ -n "${!name}" ]; then
+              OVERRIDES="$OVERRIDES $name=$(printf '%q' "${!name}")"
+            fi
+          done
           ssh -p "${PORT}" -o StrictHostKeyChecking=no \
             "${{ vars.DEPLOY_USER || 'deployer' }}@${{ vars.DEPLOY_HOST }}" \
-            "cd '${TARGET}' && docker compose up -d --build"
+            "cd '${TARGET}' &&${OVERRIDES} docker compose up -d --build"
