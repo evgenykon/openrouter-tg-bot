@@ -7,6 +7,7 @@ export interface Config {
   redisUrl: string
   model: string
   allowedUserIds: number[]
+  ownerId?: number
   systemPrompt: string
   privateSystemPrompt: string
   maxContextMessages: number
@@ -46,6 +47,11 @@ function reqString(env: Record<string, string | undefined>, name: string): strin
 function num(json: Record<string, unknown>, name: string, fallback: number): number {
   const v = json[name]
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback
+}
+
+function optionalNum(json: Record<string, unknown>, name: string): number | undefined {
+  const v = json[name]
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
 }
 
 function bool(json: Record<string, unknown>, name: string, fallback: boolean): boolean {
@@ -97,6 +103,7 @@ export function loadConfig(): Config {
     redisUrl: env.REDIS_URL ?? 'redis://localhost:6379',
     model,
     allowedUserIds: allowed,
+    ownerId: envNumber(env, 'OWNER_ID') ?? optionalNum(json, 'ownerId'),
     systemPrompt:
       typeof json.systemPrompt === 'string'
         ? json.systemPrompt

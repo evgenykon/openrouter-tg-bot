@@ -1,6 +1,7 @@
 {
   "model": "deepseek/deepseek-chat",
   "allowedUserIds": [123456789],
+  "ownerId": 123456789,
   "privateSystemPrompt": "",
   "systemPrompt": "",
   "maxContextMessages": 200,

@@ -3,13 +3,17 @@ import assert from 'node:assert/strict'
 import {
   ERR_MODEL,
   formatConsolidatedNotice,
+  formatContextNotice,
   formatDayCompressError,
   formatDayCompressedNotice,
   formatModelError,
 } from './notices.ts'
 
-test('уведомление о сжатии дня содержит дату и оба объёма', () => {
-  const text = formatDayCompressedNotice('2026-09-20', 12340, 1100, 4200, 5100)
+const CHAT = '«Тестовый чат» (-1)'
+
+test('уведомление о сжатии дня начинается с чата, содержит дату и оба объёма', () => {
+  const text = formatDayCompressedNotice(CHAT, '2026-09-20', 12340, 1100, 4200, 5100)
+  assert.match(text, /^Чат: «Тестовый чат» \(-1\)\n/)
   assert.match(text, /за дату 2026-09-20/)
   assert.match(text, /День: прежний объем 12340 симв\., новый объем 1100 симв\./)
   assert.match(text, /Блок контекста: прежний объем 4200 симв\., новый объем 5100 симв\./)
@@ -17,9 +21,16 @@ test('уведомление о сжатии дня содержит дату и
 
 test('уведомление о консолидации', () => {
   assert.equal(
-    formatConsolidatedNotice(9000, 5000),
-    'Произведена консолидация блока контекста, объем 9000 симв. → 5000 симв.',
+    formatConsolidatedNotice(CHAT, 9000, 5000),
+    'Чат: «Тестовый чат» (-1)\n' +
+      'Произведена консолидация блока контекста, объем 9000 симв. → 5000 симв.',
   )
+})
+
+test('уведомление с содержимым блока контекста', () => {
+  const text = formatContextNotice(CHAT, 'Тема: отношения\nПозиция Аня: устала')
+  assert.match(text, /^Чат: «Тестовый чат» \(-1\)\nСодержимое блока контекста чата:/)
+  assert.match(text, /Позиция Аня: устала/)
 })
 
 test('ошибка сжатия дня', () => {

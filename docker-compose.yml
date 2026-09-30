@@ -24,6 +24,7 @@ services:
       - CONTEXT_MESSAGE_MAX_CHARS=${CONTEXT_MESSAGE_MAX_CHARS:-}
       - CONTEXT_MAX_CHARS=${CONTEXT_MAX_CHARS:-}
       - COMPRESS_ENABLED=${COMPRESS_ENABLED:-}
+      - OWNER_ID=${OWNER_ID:-}
     volumes:
       - ./config.json:/app/config.json:ro
     depends_on:

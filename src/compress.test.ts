@@ -58,16 +58,22 @@ const NOW = () => new Date('2026-09-21T12:00:00Z')
 
 function deps(store: FakeStore, complete: (m: ChatMessage[]) => Promise<string>, extra = {}) {
   const notices: string[] = []
+  const ownerNotices: string[] = []
   return {
     notices,
+    ownerNotices,
     deps: {
       store,
       complete,
       participants: ['Аня', 'Борис'],
+      chatLabel: '«Тестовый чат» (-1)',
       contextMaxChars: 10_000,
       messageMaxChars: 1000,
       notify: async (text: string) => {
         notices.push(text)
+      },
+      notifyOwner: async (text: string) => {
+        ownerNotices.push(text)
       },
       now: NOW,
       ...extra,
@@ -103,11 +109,11 @@ test('текущий день не сжимается', async () => {
   assert.equal(store.compressed.size, 0)
 })
 
-test('сжимает дни от старых к новым, уведомляет по каждому и прунит', async () => {
+test('сжимает дни от старых к новым, уведомляет владельца по каждому и прунит', async () => {
   const store = new FakeStore()
   store.raw.set('2026-09-19', [msg(1, 'Аня', 'aaa', 0)])
   store.raw.set('2026-09-20', [msg(2, 'Борис', 'bbbb', 0)])
-  const { deps: d, notices } = deps(store, defaultComplete)
+  const { deps: d, notices, ownerNotices } = deps(store, defaultComplete)
   await runCompressor(d)
 
   assert.equal(store.summaries.get('2026-09-19'), 'Тема дня')
@@ -117,10 +123,25 @@ test('сжимает дни от старых к новым, уведомляе�
   assert.deepEqual(store.commits, ['2026-09-19', '2026-09-20'])
   assert.equal(store.context, 'Тема: отношения\nПозиция Аня: устала')
 
-  // по уведомлению на каждый день
-  assert.equal(notices.length, 2)
-  assert.match(notices[0] ?? '', /за дату 2026-09-19/)
-  assert.match(notices[1] ?? '', /за дату 2026-09-20/)
+  // отчёт и содержимое блока контекста на каждый день — владельцу, не в чат
+  assert.equal(notices.length, 0)
+  assert.equal(ownerNotices.length, 4)
+  assert.match(
+    ownerNotices[0] ?? '',
+    /^Чат: «Тестовый чат» \(-1\)\nБыло произведено сжатие контекста беседы за дату 2026-09-19/,
+  )
+  assert.match(
+    ownerNotices[1] ?? '',
+    /^Чат: «Тестовый чат» \(-1\)\nСодержимое блока контекста чата:\nТема: отношения/,
+  )
+  assert.match(
+    ownerNotices[2] ?? '',
+    /^Чат: «Тестовый чат» \(-1\)\nБыло произведено сжатие контекста беседы за дату 2026-09-20/,
+  )
+  assert.match(
+    ownerNotices[3] ?? '',
+    /^Чат: «Тестовый чат» \(-1\)\nСодержимое блока контекста чата:\nТема: отношения/,
+  )
 })
 
 test('ошибка модели на дне — уведомление об ошибке, день не помечен, цикл остановлен', async () => {
@@ -132,7 +153,7 @@ test('ошибка модели на дне — уведомление об ош
     if (sys.includes('сжатия одного дня')) throw new Error('HTTP 429')
     return 'ok'
   }
-  const { deps: d, notices } = deps(store, complete)
+  const { deps: d, notices, ownerNotices } = deps(store, complete)
   await runCompressor(d)
 
   assert.equal(store.compressed.size, 0)
@@ -140,6 +161,7 @@ test('ошибка модели на дне — уведомление об ош
   assert.equal(notices.length, 1)
   assert.match(notices[0] ?? '', /HTTP 429/)
   assert.match(notices[0] ?? '', /2026-09-19/)
+  assert.equal(ownerNotices.length, 0)
 })
 
 test('пустая сводка дня — ошибка, день не помечен', async () => {
@@ -162,13 +184,15 @@ test('консолидация блока при превышении лимит
     if (sys.includes('долгосрочный блок')) return 'x'.repeat(100)
     return ''
   }
-  const { deps: d, notices } = deps(store, complete, { contextMaxChars: 20 })
+  const { deps: d, notices, ownerNotices } = deps(store, complete, { contextMaxChars: 20 })
   await runCompressor(d)
 
   assert.equal(store.context, 'коротко')
-  const joined = notices.join('\n')
+  assert.equal(notices.length, 0)
+  const joined = ownerNotices.join('\n')
   assert.match(joined, /Произведена консолидация блока контекста/)
   assert.match(joined, /за дату 2026-09-20/)
+  assert.match(joined, /Содержимое блока контекста чата:\nкоротко/)
 })
 
 test('если консолидация не уменьшила блок — оставляем прежний без уведомления', async () => {
@@ -181,10 +205,12 @@ test('если консолидация не уменьшила блок — о�
     if (sys.includes('долгосрочный блок')) return 'x'.repeat(100)
     return ''
   }
-  const { deps: d, notices } = deps(store, complete, { contextMaxChars: 20 })
+  const { deps: d, notices, ownerNotices } = deps(store, complete, { contextMaxChars: 20 })
   await runCompressor(d)
   assert.equal(store.context, 'x'.repeat(100))
-  assert.doesNotMatch(notices.join('\n'), /консолидация/)
+  assert.equal(notices.length, 0)
+  assert.doesNotMatch(ownerNotices.join('\n'), /консолидация/)
+  assert.match(ownerNotices.join('\n'), /Содержимое блока контекста чата:\nx{100}/)
 })
 
 test('если лок занят — сжатие пропускается без уведомлений', async () => {

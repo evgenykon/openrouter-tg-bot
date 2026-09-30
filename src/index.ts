@@ -1,5 +1,5 @@
 import { Bot, GrammyError, type Context } from 'grammy'
-import type { Message } from '@grammyjs/types'
+import type { Chat, Message } from '@grammyjs/types'
 import type { Config } from './config.ts'
 import { loadConfig } from './config.ts'
 import { runCompressor, type CompressorStore } from './compress.ts'
@@ -106,6 +106,26 @@ async function sendPlain(chatId: number, text: string): Promise<void> {
   }
 }
 
+const ownerId = config.ownerId
+const notifyOwner =
+  ownerId === undefined ? undefined : (text: string): Promise<void> => sendPlain(ownerId, text)
+
+function chatLabel(chat: Chat): string {
+  if (chat.type === 'private') {
+    const name = [chat.first_name, chat.last_name].filter(Boolean).join(' ')
+    return `«${name}» (${chat.id})`
+  }
+  return `«${chat.title}» (${chat.id})`
+}
+
+async function chatLabelById(chatId: number): Promise<string> {
+  try {
+    return chatLabel(await bot.api.getChat(chatId))
+  } catch {
+    return String(chatId)
+  }
+}
+
 /**
  * Показывает статус «печатает…» и обновляет его, пока идёт длительная
  * операция (сжатие). Возвращает функцию остановки.
@@ -150,9 +170,11 @@ async function compressIfNeeded(ctx: Context, msg: Message): Promise<void> {
             config.reasoningMaxTokens,
           ),
         participants,
+        chatLabel: chatLabel(msg.chat),
         contextMaxChars: config.contextMaxChars,
         messageMaxChars: config.contextMessageMaxChars,
         notify: (text) => sendPlain(targetChatId, text),
+        notifyOwner,
         log: (message) => console.log(`[compress] chat=${targetChatId} ${message}`),
         delayMs: 2000,
       })
@@ -297,9 +319,11 @@ async function forceCompress(notifyChatId: number, chatId: number): Promise<void
           config.reasoningMaxTokens,
         ),
       participants,
+      chatLabel: await chatLabelById(chatId),
       contextMaxChars: config.contextMaxChars,
       messageMaxChars: config.contextMessageMaxChars,
       notify: (text) => sendPlain(notifyChatId, text),
+      notifyOwner,
       log: (message) => console.log(`[compress] chat=${chatId} ${message}`),
       delayMs: 2000,
     })

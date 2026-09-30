@@ -2,6 +2,7 @@ import { dayKeyFromDate } from './day.ts'
 import type { StoredMessage } from './db.ts'
 import {
   formatConsolidatedNotice,
+  formatContextNotice,
   formatDayCompressError,
   formatDayCompressedNotice,
 } from './notices.ts'
@@ -35,9 +36,11 @@ export interface CompressorDeps {
   store: CompressorStore
   complete: (messages: ChatMessage[]) => Promise<string>
   participants: string[]
+  chatLabel: string
   contextMaxChars: number
   messageMaxChars: number
   notify: (text: string) => Promise<void>
+  notifyOwner?: (text: string) => Promise<void>
   now?: () => Date
   log?: (message: string) => void
   /** Пауза между днями, мс — чтобы не упираться в rate limit модели. */
@@ -68,6 +71,7 @@ function errorReason(err: unknown): string {
 export async function runCompressor(deps: CompressorDeps): Promise<void> {
   const { store } = deps
   const log = deps.log ?? (() => {})
+  const notifyOwner = deps.notifyOwner ?? deps.notify
 
   await store.reindexDays()
   await store.foldLegacySummary()
@@ -123,7 +127,8 @@ export async function runCompressor(deps: CompressorDeps): Promise<void> {
           )
           if (consolidated && consolidated.length < before) {
             context = consolidated
-            await deps.notify(formatConsolidatedNotice(before, context.length))
+            await notifyOwner(formatConsolidatedNotice(deps.chatLabel, before, context.length))
+            await notifyOwner(formatContextNotice(deps.chatLabel, context))
           } else if (consolidated) {
             log(`consolidation did not shrink context (${before} -> ${consolidated.length})`)
           }
@@ -133,9 +138,17 @@ export async function runCompressor(deps: CompressorDeps): Promise<void> {
         await store.touchLock(LOCK_TTL_SECONDS)
 
         log(`compressed day ${day}: ${dayBefore} -> ${summary.length} chars`)
-        await deps.notify(
-          formatDayCompressedNotice(day, dayBefore, summary.length, prevContext.length, context.length),
+        await notifyOwner(
+          formatDayCompressedNotice(
+            deps.chatLabel,
+            day,
+            dayBefore,
+            summary.length,
+            prevContext.length,
+            context.length,
+          ),
         )
+        await notifyOwner(formatContextNotice(deps.chatLabel, context))
         if (deps.delayMs && deps.delayMs > 0) await sleep(deps.delayMs)
       } catch (err) {
         log(`failed to compress day ${day}: ${String(err)}`)
