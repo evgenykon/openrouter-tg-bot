@@ -320,6 +320,30 @@ async function deletePattern(pattern: string): Promise<void> {
   if (keys.length > 0) await Promise.all(keys.map((key) => client.del(key)))
 }
 
+/** Сбрасывает блок контекста и всё сжатое прошлое, не трогая сырую историю. */
+export async function resetContext(s: Space): Promise<void> {
+  const days = await client.zRange(daysKey(s), 0, -1)
+  const pipe = client.multi().del(contextKey(s)).del(daysKey(s))
+  for (const day of days) pipe.del(daySummaryKey(s, day))
+  await pipe.exec()
+}
+
+/** Сбрасывает сырую историю сообщений, не трогая блок контекста. */
+export async function resetHistory(s: Space): Promise<void> {
+  await deletePattern(`${base(s)}:msg:*`)
+  await deletePattern(`${base(s)}:daymsgs:*`)
+  await client.del([messagesKey(s), rawDaysKey(s)])
+}
+
+export async function getDiscuss(userId: number): Promise<boolean> {
+  return (await client.get(`discuss:${userId}`)) === '1'
+}
+
+export async function setDiscuss(userId: number, on: boolean): Promise<void> {
+  if (on) await client.set(`discuss:${userId}`, '1')
+  else await client.del(`discuss:${userId}`)
+}
+
 export async function resetChat(chatId: number): Promise<void> {
   const s = chatSpace(chatId)
   const users = await client.sMembers(usersKey(s))

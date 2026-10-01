@@ -6,16 +6,22 @@ import { runCompressor, type CompressorStore } from './compress.ts'
 import { dayKeyFromDate } from './day.ts'
 import {
   chatParticipants,
+  chatSpace,
   chatStore,
   closeRedis,
+  dmSpace,
   dmStore,
+  getDiscuss,
   getProfile,
   initRedis,
   listUserGroupChats,
   resetChat,
+  resetContext,
   resetDm,
+  resetHistory,
   saveChatMessage,
   saveDmMessage,
+  setDiscuss,
   setProfile,
   updateChatMessageText,
   type StoredMessage,
@@ -487,6 +493,17 @@ bot.on('message', async (ctx) => {
         break
       }
       case 'start':
+        if (
+          isPrivate &&
+          msg.from.id === config.ownerId &&
+          !(await getDiscuss(msg.from.id))
+        ) {
+          await ctx.reply(
+            'Обсуждение не запущено: сообщения не сохраняются. /start_discuss — начать.',
+            { reply_to_message_id: msg.message_id },
+          )
+          break
+        }
         await answer(
           ctx,
           msg,
@@ -499,23 +516,54 @@ bot.on('message', async (ctx) => {
           },
         )
         break
-      case 'help':
+      case 'help': {
+        const isOwner = isPrivate && msg.from.id === config.ownerId
         await ctx.reply(
           'Я — психологический помощник. Тегни меня (@' + botUsername + ') с вопросом.\n' +
             '/start — приветствие и начало диалога\n' +
+            (isOwner ? '/start_discuss — начать обсуждение; /stop_discuss — закончить\n' : '') +
             '/profile — посмотреть профиль; /profile set|add <текст> — сохранить или дополнить\n' +
             '/ext_profile <id> — чужой профиль; set <id> <текст> — установить\n' +
             '/compress_chat — статус чатов; /compress_chat <id> — сжать историю чата\n' +
-            '/reset — очистить историю чата\n' +
+            '/context_reset — очистить блок контекста\n' +
+            '/history_reset — очистить историю сообщений\n' +
+            '/reset — очистить историю и контекст\n' +
             '/help — список команд\n' +
             '/show_prompt — показать текущий системный промпт',
           { reply_to_message_id: msg.message_id },
         )
         break
+      }
+      case 'start_discuss':
+      case 'stop_discuss': {
+        if (!(isPrivate && msg.from.id === config.ownerId)) {
+          await ctx.reply('Команда доступна только владельцу в личке.', {
+            reply_to_message_id: msg.message_id,
+          })
+          break
+        }
+        const on = cmd === 'start_discuss'
+        await setDiscuss(msg.from.id, on)
+        await ctx.reply(
+          on
+            ? 'Режим обсуждения включён. Сообщения сохраняются до /stop_discuss.'
+            : 'Режим обсуждения выключен. Сообщения больше не сохраняются.',
+          { reply_to_message_id: msg.message_id },
+        )
+        break
+      }
+      case 'context_reset':
+        await resetContext(isPrivate ? dmSpace(msg.from.id) : chatSpace(chatId))
+        await ctx.reply('Блок контекста очищен.', { reply_to_message_id: msg.message_id })
+        break
+      case 'history_reset':
+        await resetHistory(isPrivate ? dmSpace(msg.from.id) : chatSpace(chatId))
+        await ctx.reply('История очищена.', { reply_to_message_id: msg.message_id })
+        break
       case 'reset':
         if (isPrivate) await resetDm(msg.from.id)
         else await resetChat(chatId)
-        await ctx.reply('История очищена.', { reply_to_message_id: msg.message_id })
+        await ctx.reply('История и контекст очищены.', { reply_to_message_id: msg.message_id })
         break
       default:
         if (isPrivate) {
@@ -533,6 +581,17 @@ bot.on('message', async (ctx) => {
 
   if (isPrivate) {
     if (!allowed) return
+    if (
+      config.ownerId !== undefined &&
+      msg.from.id === config.ownerId &&
+      !(await getDiscuss(msg.from.id))
+    ) {
+      await ctx.reply(
+        'Обсуждение не запущено: сообщения не сохраняются. /start_discuss — начать.',
+        { reply_to_message_id: msg.message_id },
+      )
+      return
+    }
     await answer(ctx, msg, () => buildDmContext(msg.from.id, config, displayName(msg)), {
       name: displayName(msg),
       text: msg.text ?? '',
@@ -596,13 +655,25 @@ async function main(): Promise<void> {
     { command: 'profile', description: 'Профиль: просмотр, set/add <текст>, clear' },
     { command: 'ext_profile', description: 'Профиль другого юзера: <id> или set <id> <текст>' },
     { command: 'compress_chat', description: 'Статус чатов или сжать историю: <id>' },
-    { command: 'reset', description: 'Очистить историю чата' },
+    { command: 'context_reset', description: 'Очистить блок контекста' },
+    { command: 'history_reset', description: 'Очистить историю сообщений' },
+    { command: 'reset', description: 'Очистить историю и контекст' },
     { command: 'show_prompt', description: 'Показать текущий системный промпт' },
     { command: 'help', description: 'Помощь' },
   ]
   await bot.api.setMyCommands(commands)
   await bot.api.setMyCommands(commands, { scope: { type: 'all_private_chats' } })
   await bot.api.setMyCommands(commands, { scope: { type: 'all_group_chats' } })
+  if (config.ownerId !== undefined) {
+    await bot.api.setMyCommands(
+      [
+        ...commands,
+        { command: 'start_discuss', description: 'Начать обсуждение в личке владельца' },
+        { command: 'stop_discuss', description: 'Закончить обсуждение' },
+      ],
+      { scope: { type: 'chat', chat_id: config.ownerId } },
+    )
+  }
 
   const contextLength = await getModelContextLength(config.model, config.openrouterApiKey)
   console.log(
