@@ -70,6 +70,11 @@ interface ProfileBlock {
   tokens: number
 }
 
+export function participantsLine(names: string[]): string {
+  const list = [...new Set(names.map((n) => n.trim()).filter(Boolean))]
+  return list.length > 0 ? `В чате участвуют: ${list.join(', ')}.` : ''
+}
+
 async function buildProfiles(
   participants: Map<number, string>,
   currentUserId: number,
@@ -78,6 +83,13 @@ async function buildProfiles(
   const messages: ChatMessage[] = []
   let tokens = 0
   const ordered = [currentUserId, ...[...participants.keys()].filter((uid) => uid !== currentUserId)]
+
+  const roster = participantsLine(ordered.map((uid) => participants.get(uid) ?? ''))
+  if (roster) {
+    messages.push({ role: 'user', content: roster })
+    tokens += estimateTokens(roster)
+  }
+
   for (const uid of ordered) {
     const profile = (await getProfile(uid)).trim()
     const line = profile
