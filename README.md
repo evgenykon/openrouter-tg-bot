@@ -178,12 +178,13 @@ Push в ветку `main` автоматически запускает `.github
 достаточно передеплоить; незаданная переменная — значение из `config.json`.
 Для отчётов о сжатии в личку владельца задай `OWNER_ID` = telegram id.
 
-Например, чтобы перевести бота на DeepSeek V4.1 Flash:
+Например, чтобы перевести бота на свежий DeepSeek Flash и расширить окно ответа:
 
 | Variable | Значение |
 | --- | --- |
-| `MODEL` | `deepseek/deepseek-v4.1-flash` |
-| `COMPRESS_MODEL` | `deepseek/deepseek-chat` (если сжатие на новой модели отдаёт пустые ответы) |
+| `MODEL` | `~deepseek/deepseek-flash-latest` |
+| `COMPRESS_MODEL` | `deepseek/deepseek-chat` (не-reasoning — иначе сжатие зависает/отдаёт пустой content) |
+| `MAX_TOKENS` | `32768` |
 
 Пользователь `deployer` должен иметь права на запись в `DEPLOY_TARGET` и доступ
 к docker-сокету (`sudo usermod -aG docker deployer`). После первого успешного
